@@ -1,5 +1,3 @@
-'use client';
-
 export default function Home() {
   const hour = new Date().getHours();
   let greeting = 'Good Evening, Adam';
@@ -10,8 +8,8 @@ export default function Home() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <h1 className="text-5xl font-bold text-indigo-900">
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #f3f4f6 0%, #e0e7ff 100%)' }}>
+      <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: '#1e1b4b' }}>
         {greeting}
       </h1>
     </div>
