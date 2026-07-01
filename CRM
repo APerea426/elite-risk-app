@@ -1,4 +1,4 @@
 cd /Users/pereafamilycalendar/Desktop/Adam\ Projects/elite-risk-app
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/elite-risk-app.git
+git remote add origin https://github.com/APEREA/elite-risk-app.git
 git branch -M main
 git push -u origin main
