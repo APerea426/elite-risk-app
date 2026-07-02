@@ -16,6 +16,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     invoicesResult,
     clientRateResult,
     globalRateResult,
+    programStructureResult,
+    latestProjectionResult,
   ] = await Promise.all([
     supabase.from('clients').select('*').eq('id', id).single(),
     supabase.from('coverages').select('*').eq('client_id', id).order('created_at'),
@@ -24,6 +26,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     supabase.from('invoices').select('*').eq('client_id', id).order('invoice_number', { ascending: false }),
     supabase.from('commission_settings').select('base_commission_rate').eq('client_id', id).maybeSingle(),
     supabase.from('commission_settings').select('base_commission_rate').is('client_id', null).maybeSingle(),
+    supabase.from('program_structures').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('profitability_projections').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
 
   if (!clientResult.data) redirect('/clients');
@@ -41,6 +45,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       commissions={commissionsResult.data ?? []}
       invoices={invoicesResult.data ?? []}
       effectiveRate={effectiveRate}
+      programStructure={programStructureResult.data ?? null}
+      latestProjection={latestProjectionResult.data ?? null}
     />
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice } from '@/types/database';
+import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection } from '@/types/database';
 import ProgramTypePicker, {
   computeProgramType,
   parseProgramType,
@@ -64,9 +64,14 @@ interface Props {
   commissions: Commission[];
   invoices: Invoice[];
   effectiveRate: number;
+  programStructure: ProgramStructure | null;
+  latestProjection: ProfitabilityProjection | null;
 }
 
-export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate }: Props) {
+const fmt2 = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
+
+export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [client, setClient] = useState(initialClient);
   const [coverages, setCoverages] = useState(initialCoverages);
@@ -91,6 +96,27 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
 
   // Invoice state
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+
+  // Program structure state
+  const [programStructure, setProgramStructure] = useState<ProgramStructure | null>(initialProgramStructure);
+  const [structureMode, setStructureMode] = useState<'view' | 'edit'>(initialProgramStructure ? 'view' : 'edit');
+  const [structureForm, setStructureForm] = useState({
+    carrier: (initialProgramStructure?.carrier ?? 'victoria') as 'victoria' | 'ottawa',
+    captive_retention: initialProgramStructure ? String(initialProgramStructure.captive_retention) : '',
+    excess_layer: initialProgramStructure ? String(initialProgramStructure.excess_layer) : '',
+    captive_premium_pct: initialProgramStructure ? String(Math.round(initialProgramStructure.captive_premium_pct * 100)) : '40',
+    new_annual_premium: initialProgramStructure ? String(initialProgramStructure.new_annual_premium) : '',
+    annual_expenses: initialProgramStructure ? String(initialProgramStructure.annual_expenses) : '',
+    notes: initialProgramStructure?.notes ?? '',
+  });
+  const [structureSaving, setStructureSaving] = useState(false);
+  const [structureError, setStructureError] = useState('');
+
+  // Profitability state
+  const [latestProjection, setLatestProjection] = useState<ProfitabilityProjection | null>(initialLatestProjection);
+  const [projecting, setProjecting] = useState(false);
+  const [projectionError, setProjectionError] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Overview edit state
   const [editOpen, setEditOpen] = useState(false);
@@ -291,6 +317,76 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       setInvoices(prev => prev.map(inv => inv.id === invoiceId ? data : inv));
     }
     setMarkingPaidId(null);
+  }
+
+  function openEditStructure() {
+    if (programStructure) {
+      setStructureForm({
+        carrier: programStructure.carrier,
+        captive_retention: String(programStructure.captive_retention),
+        excess_layer: String(programStructure.excess_layer),
+        captive_premium_pct: String(Math.round(programStructure.captive_premium_pct * 100)),
+        new_annual_premium: String(programStructure.new_annual_premium),
+        annual_expenses: String(programStructure.annual_expenses),
+        notes: programStructure.notes ?? '',
+      });
+    }
+    setStructureError('');
+    setStructureMode('edit');
+  }
+
+  async function handleSaveStructure(e: React.FormEvent) {
+    e.preventDefault();
+    setStructureSaving(true);
+    setStructureError('');
+    const res = await fetch(`/api/clients/${client.id}/program-structure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        carrier: structureForm.carrier,
+        captive_retention: Number(structureForm.captive_retention),
+        excess_layer: Number(structureForm.excess_layer),
+        captive_premium_pct: Number(structureForm.captive_premium_pct) / 100,
+        new_annual_premium: Number(structureForm.new_annual_premium),
+        annual_expenses: Number(structureForm.annual_expenses),
+        notes: structureForm.notes || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setStructureError(data.error); setStructureSaving(false); return; }
+    setProgramStructure(data);
+    setStructureMode('view');
+    setStructureSaving(false);
+  }
+
+  async function handleGenerateProjection() {
+    if (!programStructure) return;
+    setProjecting(true);
+    setProjectionError('');
+    const res = await fetch(`/api/clients/${client.id}/projections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ program_structure_id: programStructure.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setProjectionError(data.error); setProjecting(false); return; }
+    setLatestProjection(data);
+    setProjecting(false);
+  }
+
+  async function handleDownloadPdf() {
+    if (!latestProjection) return;
+    setPdfLoading(true);
+    const res = await fetch(`/api/clients/${client.id}/projections/${latestProjection.id}/pdf`);
+    if (!res.ok) { setPdfLoading(false); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `profitability-report-${client.company_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setPdfLoading(false);
   }
 
   const tabClass = (id: TabId) =>
@@ -625,8 +721,316 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
         </div>
       )}
 
+      {/* Tab: Program Structure */}
+      {activeTab === 'structure' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">Program Structure</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Defines the captive structure used to generate profitability projections</p>
+            </div>
+            {structureMode === 'view' && (
+              <button onClick={openEditStructure} className="text-sm text-indigo-600 hover:underline">
+                Update Structure
+              </button>
+            )}
+          </div>
+
+          {structureMode === 'view' && programStructure ? (
+            <dl className="grid grid-cols-3 gap-x-8 gap-y-5 text-sm">
+              <div>
+                <dt className="text-slate-500 mb-0.5">Carrier</dt>
+                <dd className="text-slate-800 font-medium capitalize">{programStructure.carrier}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 mb-0.5">Captive Retention (Deductible)</dt>
+                <dd className="text-slate-800 font-medium">{fmt(programStructure.captive_retention)}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 mb-0.5">Excess Layer</dt>
+                <dd className="text-slate-800 font-medium">{fmt(programStructure.excess_layer)}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 mb-0.5">Captive Premium Split</dt>
+                <dd className="text-slate-800 font-medium">{Math.round(programStructure.captive_premium_pct * 100)}%</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 mb-0.5">New Annual Premium</dt>
+                <dd className="text-slate-800 font-medium">{fmt(programStructure.new_annual_premium)}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 mb-0.5">Annual Expenses</dt>
+                <dd className="text-slate-800 font-medium">{fmt(programStructure.annual_expenses)}</dd>
+              </div>
+              {programStructure.notes && (
+                <div className="col-span-3">
+                  <dt className="text-slate-500 mb-0.5">Notes</dt>
+                  <dd className="text-slate-800">{programStructure.notes}</dd>
+                </div>
+              )}
+              <div className="col-span-3 text-xs text-slate-400">
+                Last saved {new Date(programStructure.created_at).toLocaleString()}
+              </div>
+            </dl>
+          ) : (
+            <form onSubmit={handleSaveStructure} className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Carrier <span className="text-red-500">*</span></label>
+                <div className="flex gap-2">
+                  {(['victoria', 'ottawa'] as const).map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setStructureForm(f => ({ ...f, carrier: c }))}
+                      className={`px-5 py-2 rounded-lg border text-sm font-medium transition-colors capitalize ${
+                        structureForm.carrier === c
+                          ? 'bg-indigo-700 border-indigo-700 text-white'
+                          : 'border-slate-300 text-slate-600 hover:border-indigo-400'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Captive Retention / Deductible ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0" step="1000"
+                    placeholder="500000"
+                    value={structureForm.captive_retention}
+                    onChange={e => setStructureForm(f => ({ ...f, captive_retention: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Excess Layer ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0" step="1000"
+                    placeholder="1000000"
+                    value={structureForm.excess_layer}
+                    onChange={e => setStructureForm(f => ({ ...f, excess_layer: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Captive Premium Split (%) <span className="text-red-500">*</span></label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number" required min="1" max="100" step="1"
+                      value={structureForm.captive_premium_pct}
+                      onChange={e => setStructureForm(f => ({ ...f, captive_premium_pct: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span className="text-slate-400 text-sm">%</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">New Annual Premium ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0" step="1000"
+                    placeholder="600000"
+                    value={structureForm.new_annual_premium}
+                    onChange={e => setStructureForm(f => ({ ...f, new_annual_premium: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Annual Expenses ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0" step="100"
+                    placeholder="25000"
+                    value={structureForm.annual_expenses}
+                    onChange={e => setStructureForm(f => ({ ...f, annual_expenses: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea
+                  value={structureForm.notes}
+                  onChange={e => setStructureForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {structureError && <p className="text-sm text-red-600">{structureError}</p>}
+              <div className="flex gap-3 justify-end">
+                {programStructure && (
+                  <button type="button" onClick={() => setStructureMode('view')} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                )}
+                <button
+                  type="submit"
+                  disabled={structureSaving}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {structureSaving ? 'Saving…' : 'Save Structure'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Profitability */}
+      {activeTab === 'profitability' && (
+        <div className="space-y-6">
+          {history.length === 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+              Add premium &amp; loss history in the History tab before generating a projection.
+            </div>
+          )}
+          {history.length > 0 && !programStructure && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+              Save a program structure in the Program Structure tab before generating a projection.
+            </div>
+          )}
+
+          {history.length > 0 && programStructure && (
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">Profitability Analysis</h2>
+                {latestProjection && (
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Last generated {new Date(latestProjection.created_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {latestProjection && (
+                  <button
+                    onClick={handleDownloadPdf}
+                    disabled={pdfLoading}
+                    className="text-sm text-indigo-600 hover:underline disabled:opacity-50"
+                  >
+                    {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+                  </button>
+                )}
+                <button
+                  onClick={handleGenerateProjection}
+                  disabled={projecting}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {projecting ? 'Generating…' : latestProjection ? 'Regenerate Report' : 'Generate Report'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {projectionError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{projectionError}</div>
+          )}
+
+          {latestProjection && (() => {
+            const { historical, projection, summary, structure } = latestProjection.projection_data;
+            return (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-4 gap-4">
+                  {[
+                    { label: 'Avg Historical Loss Rate', value: (summary.avg_historical_loss_rate * 100).toFixed(1) + '%' },
+                    { label: 'Captive Premium / yr', value: fmt(structure.new_annual_premium * structure.captive_premium_pct) },
+                    { label: 'Avg Annual Profit', value: fmt2(summary.avg_annual_projected_profit), pos: summary.avg_annual_projected_profit >= 0 },
+                    { label: '5-Year Total Profit', value: fmt2(summary.total_5yr_projected_profit), pos: summary.total_5yr_projected_profit >= 0 },
+                  ].map(({ label, value, pos }) => (
+                    <div key={label} className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+                      <p className={`text-lg font-bold ${pos === undefined ? 'text-slate-800' : pos ? 'text-green-700' : 'text-red-600'}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Historical table */}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100">
+                    <h3 className="text-sm font-semibold text-slate-700">Historical Analysis</h3>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Year</th>
+                        <th className="px-4 py-3 text-right">Total Premium</th>
+                        <th className="px-4 py-3 text-right">Captive Premium</th>
+                        <th className="px-4 py-3 text-right">Total Losses</th>
+                        <th className="px-4 py-3 text-right">Captive Losses</th>
+                        <th className="px-4 py-3 text-right">Excess Losses</th>
+                        <th className="px-4 py-3 text-right">Loss Ratio</th>
+                        <th className="px-4 py-3 text-right">Client P&amp;L</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {historical.map((row, idx) => (
+                        <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                          <td className="px-4 py-3 font-medium text-slate-800">{row.year}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.premium)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.losses)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_losses)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.excess_losses)}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={row.captive_loss_ratio > 0.7 ? 'text-red-600 font-medium' : 'text-slate-700'}>
+                              {(row.captive_loss_ratio * 100).toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className={`px-4 py-3 text-right font-medium ${row.client_pl >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                            {fmt2(row.client_pl)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Projection table */}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100">
+                    <h3 className="text-sm font-semibold text-slate-700">5-Year Forward Projection</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Based on {summary.years_of_history} {summary.years_of_history === 1 ? 'year' : 'years'} of history · avg loss rate {(summary.avg_historical_loss_rate * 100).toFixed(1)}%</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Year</th>
+                        <th className="px-4 py-3 text-right">Captive Premium</th>
+                        <th className="px-4 py-3 text-right">Projected Losses</th>
+                        <th className="px-4 py-3 text-right">Captive Losses</th>
+                        <th className="px-4 py-3 text-right">Expenses</th>
+                        <th className="px-4 py-3 text-right">Net Profit</th>
+                        <th className="px-4 py-3 text-right">Cumulative Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {projection.map((row, idx) => (
+                        <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                          <td className="px-4 py-3 font-medium text-slate-800">Year {row.year}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_total_losses)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_captive_losses)}</td>
+                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.expenses)}</td>
+                          <td className={`px-4 py-3 text-right font-medium ${row.net_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                            {fmt2(row.net_profit)}
+                          </td>
+                          <td className={`px-4 py-3 text-right font-medium ${row.cumulative_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                            {fmt2(row.cumulative_profit)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Stub tabs */}
-      {['engagement', 'structure', 'profitability', 'comments'].includes(activeTab) && (
+      {['engagement', 'comments'].includes(activeTab) && (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
           <p className="text-sm">Coming in Module {TABS.find(t => t.id === activeTab)?.module}.</p>
         </div>

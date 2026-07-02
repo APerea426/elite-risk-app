@@ -109,6 +109,72 @@ export interface Invoice {
   created_at: string;
 }
 
+export interface ProgramStructure {
+  id: string;
+  client_id: string;
+  captive_retention: number;
+  excess_layer: number;
+  carrier: 'victoria' | 'ottawa';
+  captive_premium_pct: number;
+  new_annual_premium: number;
+  annual_expenses: number;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface HistoricalYear {
+  year: number;
+  premium: number;
+  losses: number;
+  captive_premium: number;
+  excess_premium: number;
+  captive_losses: number;
+  excess_losses: number;
+  captive_loss_ratio: number;
+  client_pl: number;
+}
+
+export interface ProjectionYear {
+  year: number;
+  captive_premium: number;
+  projected_total_losses: number;
+  projected_captive_losses: number;
+  expenses: number;
+  net_profit: number;
+  cumulative_profit: number;
+}
+
+export interface ProjectionData {
+  client_name: string;
+  generated_at: string;
+  structure: {
+    captive_retention: number;
+    excess_layer: number;
+    carrier: string;
+    captive_premium_pct: number;
+    new_annual_premium: number;
+    annual_expenses: number;
+  };
+  historical: HistoricalYear[];
+  projection: ProjectionYear[];
+  summary: {
+    avg_historical_loss_rate: number;
+    total_5yr_projected_profit: number;
+    avg_annual_projected_profit: number;
+    years_of_history: number;
+  };
+}
+
+export interface ProfitabilityProjection {
+  id: string;
+  client_id: string;
+  program_structure_id: string;
+  projection_data: ProjectionData;
+  created_by: string;
+  created_at: string;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;
