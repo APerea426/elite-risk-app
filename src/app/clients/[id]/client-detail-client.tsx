@@ -71,6 +71,173 @@ interface Props {
 const fmt2 = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
 
+function EngagementTab({ clientId, client }: { clientId: string; client: Client }) {
+  const carrierDefault =
+    client.carrier === 'victoria' ? 'Victoria Corporate Ltd' :
+    client.carrier === 'ottawa' ? 'Ottawa Insurance Ltd' : '';
+
+  const [letterType, setLetterType] = useState<'cell' | 'standalone'>('cell');
+  const [form, setForm] = useState({
+    date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    greeting_name: client.contact_name ?? '',
+    company_name: client.company_name,
+    carrier_name: carrierDefault,
+    policy_description: '',
+    set_engagement_date: true,
+  });
+  const [downloading, setDownloading] = useState(false);
+  const [engError, setEngError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  async function handleDownload(e: React.FormEvent) {
+    e.preventDefault();
+    setDownloading(true);
+    setEngError('');
+    setSuccess(false);
+    const res = await fetch(`/api/clients/${clientId}/engagement-letter`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ letter_type: letterType, ...form }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      setEngError(data.error);
+      setDownloading(false);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `engagement-letter-${client.company_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSuccess(true);
+    setDownloading(false);
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div className="mb-6">
+        <h2 className="text-sm font-semibold text-slate-700">Generate Engagement Letter</h2>
+        <p className="text-xs text-slate-400 mt-0.5">Downloads a filled Word document (.docx) ready to send</p>
+      </div>
+
+      <form onSubmit={handleDownload} className="space-y-5">
+        {/* Letter type */}
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Letter Type <span className="text-red-500">*</span></label>
+          <div className="flex gap-2">
+            {([
+              { value: 'cell', label: 'Cell Captive', sub: '$25k formation · $50k capitalization · $45k/yr mgmt' },
+              { value: 'standalone', label: 'Stand-Alone Captive', sub: '$60k formation · $250k capitalization · $55k/yr mgmt' },
+            ] as const).map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setLetterType(opt.value)}
+                className={`flex-1 text-left px-4 py-3 rounded-lg border transition-colors ${
+                  letterType === opt.value
+                    ? 'bg-indigo-50 border-indigo-600 text-indigo-800'
+                    : 'border-slate-300 text-slate-600 hover:border-indigo-300'
+                }`}
+              >
+                <div className="text-sm font-medium">{opt.label}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{opt.sub}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Letter Date <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              required
+              value={form.date}
+              onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="July 2, 2026"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Greeting Name</label>
+            <input
+              type="text"
+              value={form.greeting_name}
+              onChange={e => setForm(f => ({ ...f, greeting_name: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Contact name for 'Dear [Name],'"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Company Name <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              required
+              value={form.company_name}
+              onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Carrier Name</label>
+            <input
+              type="text"
+              value={form.carrier_name}
+              onChange={e => setForm(f => ({ ...f, carrier_name: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Victoria Corporate Ltd"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Captive Policy Description</label>
+          <textarea
+            value={form.policy_description}
+            onChange={e => setForm(f => ({ ...f, policy_description: e.target.value }))}
+            rows={3}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Describe the captive policy coverage…"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="set-eng-date"
+            checked={form.set_engagement_date}
+            onChange={e => setForm(f => ({ ...f, set_engagement_date: e.target.checked }))}
+            className="rounded border-slate-300 text-indigo-600"
+          />
+          <label htmlFor="set-eng-date" className="text-sm text-slate-600">
+            Set today as the Engagement Letter Date on this client record
+          </label>
+        </div>
+
+        {engError && <p className="text-sm text-red-600">{engError}</p>}
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700">
+            Letter downloaded successfully.
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={downloading}
+            className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-5 py-2 rounded-lg disabled:opacity-50"
+          >
+            {downloading ? 'Preparing…' : 'Download Letter (.docx)'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [client, setClient] = useState(initialClient);
@@ -1029,8 +1196,13 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
         </div>
       )}
 
+      {/* Tab: Engagement Letters */}
+      {activeTab === 'engagement' && (() => {
+        return <EngagementTab clientId={client.id} client={client} />;
+      })()}
+
       {/* Stub tabs */}
-      {['engagement', 'comments'].includes(activeTab) && (
+      {['comments'].includes(activeTab) && (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
           <p className="text-sm">Coming in Module {TABS.find(t => t.id === activeTab)?.module}.</p>
         </div>
