@@ -77,7 +77,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const replacements: Record<string, string> = {
       'DATE': date || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-      'Client Name,': `${(client_name ?? '').trim() || company_name.trim()},`,
+      'Client Name': (client_name ?? '').trim() || company_name.trim(),
       '(Company Name)': company_name.trim(),
       '(Carrier Name)': carrier_name?.trim() || 'Victoria Corporate Ltd',
       '(Captive Policy Description)': policy_description?.trim() || '',
