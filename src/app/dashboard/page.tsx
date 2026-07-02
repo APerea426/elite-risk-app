@@ -13,10 +13,10 @@ export default async function DashboardPage() {
     .eq('auth_id', authUser.id)
     .single();
 
-  const { count: prospectCount } = await supabase
-    .from('prospects')
-    .select('*', { count: 'exact', head: true })
-    .eq('status', 'active');
+  const [{ count: prospectCount }, { count: clientCount }] = await Promise.all([
+    supabase.from('prospects').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+    supabase.from('clients').select('*', { count: 'exact', head: true }),
+  ]);
 
   const firstName = profile?.full_name?.split(' ')[0] ?? 'there';
   const hour = new Date().getHours();
@@ -32,7 +32,7 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-3 gap-4 max-w-lg">
         <div className="bg-white rounded-xl border border-slate-200 p-5 text-center">
-          <p className="text-2xl font-bold text-indigo-900">—</p>
+          <p className="text-2xl font-bold text-indigo-900">{clientCount ?? 0}</p>
           <p className="text-sm text-slate-500 mt-1">Clients</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-5 text-center">

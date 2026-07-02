@@ -26,6 +26,15 @@ export interface Prospect {
   updated_at: string;
 }
 
+export type ProgramType =
+  | 'captive_only'
+  | 'ottawa_victoria_captive'
+  | 'ottawa_victoria_only'
+  | 'fronted'
+  | 'fronted_captive';
+
+export type CarrierType = 'ottawa' | 'victoria' | 'none';
+
 export interface Client {
   id: string;
   prospect_id: string | null;
@@ -33,13 +42,31 @@ export interface Client {
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
-  program_type: string;
-  carrier: string | null;
+  program_type: ProgramType;
+  carrier: CarrierType;
   notes: string | null;
   engagement_letter_date: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface Coverage {
+  id: string;
+  client_id: string;
+  coverage_type: string;
+  policy_limit: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface PremiumLossHistory {
+  id: string;
+  client_id: string;
+  year: number;
+  premium: number;
+  losses: number;
+  created_at: string;
 }
 
 export interface ActivityLog {
