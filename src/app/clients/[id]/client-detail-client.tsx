@@ -282,6 +282,45 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   // Invoice state
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
+  // Invoice tracking modal state
+  const [trackingInv, setTrackingInv] = useState<Invoice | null>(null);
+  const [trackingForm, setTrackingForm] = useState({ date_sent: '', base_commission_received: '', mga_fee_received: '', date_received: '' });
+  const [trackingSaving, setTrackingSaving] = useState(false);
+  const [trackingError, setTrackingError] = useState('');
+
+  function openTracking(inv: Invoice) {
+    setTrackingForm({
+      date_sent: inv.date_sent ?? '',
+      base_commission_received: inv.base_commission_received != null ? String(inv.base_commission_received) : '',
+      mga_fee_received: inv.mga_fee_received != null ? String(inv.mga_fee_received) : '',
+      date_received: inv.date_received ?? '',
+    });
+    setTrackingError('');
+    setTrackingInv(inv);
+  }
+
+  async function handleSaveTracking(e: React.FormEvent) {
+    e.preventDefault();
+    if (!trackingInv) return;
+    setTrackingSaving(true);
+    setTrackingError('');
+    const res = await fetch(`/api/invoices/${trackingInv.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date_sent: trackingForm.date_sent || null,
+        base_commission_received: trackingForm.base_commission_received !== '' ? Number(trackingForm.base_commission_received) : null,
+        mga_fee_received: trackingForm.mga_fee_received !== '' ? Number(trackingForm.mga_fee_received) : null,
+        date_received: trackingForm.date_received || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setTrackingError(data.error); setTrackingSaving(false); return; }
+    setInvoices(prev => prev.map(i => i.id === data.id ? data : i));
+    setTrackingInv(null);
+    setTrackingSaving(false);
+  }
+
   // Program structure state
   const [programStructure, setProgramStructure] = useState<ProgramStructure | null>(initialProgramStructure);
   const [structureMode, setStructureMode] = useState<'view' | 'edit'>(initialProgramStructure ? 'view' : 'edit');
@@ -809,43 +848,74 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
             {commissions.length === 0 ? (
               <div className="p-10 text-center text-slate-400 text-sm">No commissions yet.</div>
             ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                  <tr>
-                    <th className="px-6 py-3 text-left">Policy Period</th>
-                    <th className="px-6 py-3 text-right">Premium</th>
-                    <th className="px-6 py-3 text-right">Rate</th>
-                    <th className="px-6 py-3 text-right">Base Comm.</th>
-                    <th className="px-6 py-3 text-right">MGA Fee</th>
-                    <th className="px-6 py-3 text-right">Total</th>
-                    <th className="px-6 py-3 text-left">Invoice</th>
-                    <th className="px-6 py-3 text-left">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {commissions.map(comm => {
-                    const inv = invoices.find(i => i.commission_id === comm.id);
-                    return (
-                      <tr key={comm.id}>
-                        <td className="px-6 py-4 text-slate-700">{comm.policy_period ?? '—'}</td>
-                        <td className="px-6 py-4 text-right text-slate-700">{fmt(comm.premium_amount)}</td>
-                        <td className="px-6 py-4 text-right text-slate-500">{(comm.base_commission_rate * 100).toFixed(1)}%</td>
-                        <td className="px-6 py-4 text-right text-slate-700">{fmt(comm.base_commission_amount)}</td>
-                        <td className="px-6 py-4 text-right text-slate-700">{comm.mga_fee > 0 ? fmt(comm.mga_fee) : '—'}</td>
-                        <td className="px-6 py-4 text-right font-medium text-slate-800">{fmt(comm.total_commission)}</td>
-                        <td className="px-6 py-4">
-                          {inv ? (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                              #{inv.invoice_number} {inv.status === 'paid' ? '✓' : '· Outstanding'}
-                            </span>
-                          ) : '—'}
-                        </td>
-                        <td className="px-6 py-4 text-slate-500">{new Date(comm.created_at).toLocaleDateString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">Policy Period</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Premium</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Rate</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Base Comm.</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Base Received</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">MGA Fee</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">MGA Received</th>
+                      <th className="px-4 py-3 text-right whitespace-nowrap">Total</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">Invoice</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">Date Sent</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">Date Received</th>
+                      <th className="px-4 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {commissions.map(comm => {
+                      const inv = invoices.find(i => i.commission_id === comm.id);
+                      return (
+                        <tr key={comm.id}>
+                          <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{comm.policy_period ?? '—'}</td>
+                          <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{fmt(comm.premium_amount)}</td>
+                          <td className="px-4 py-3 text-right text-slate-500">{(comm.base_commission_rate * 100).toFixed(1)}%</td>
+                          <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{fmt(comm.base_commission_amount)}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {inv?.base_commission_received != null
+                              ? <span className="text-green-700 font-medium">{fmt(inv.base_commission_received)}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{comm.mga_fee > 0 ? fmt(comm.mga_fee) : '—'}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {inv?.mga_fee_received != null
+                              ? <span className="text-green-700 font-medium">{fmt(inv.mga_fee_received)}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-slate-800 whitespace-nowrap">{fmt(comm.total_commission)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {inv ? (
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                #{inv.invoice_number} {inv.status === 'paid' ? '✓' : '· Outstanding'}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
+                            {inv?.date_sent ? new Date(inv.date_sent + 'T00:00:00').toLocaleDateString() : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
+                            {inv?.date_received ? new Date(inv.date_received + 'T00:00:00').toLocaleDateString() : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {inv && (
+                              <button
+                                onClick={() => openTracking(inv)}
+                                className="text-xs text-indigo-600 hover:underline whitespace-nowrap"
+                              >
+                                Log
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
@@ -1218,6 +1288,72 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       {activeTab === 'engagement' && (() => {
         return <EngagementTab clientId={client.id} client={client} />;
       })()}
+
+      {/* Invoice Tracking Modal */}
+      {trackingInv && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Log Invoice #{trackingInv.invoice_number}</h2>
+            <p className="text-xs text-slate-400 mb-5">Track when this invoice was sent and when payment was received</p>
+            <form onSubmit={handleSaveTracking} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date Invoice Sent</label>
+                  <input
+                    type="date"
+                    value={trackingForm.date_sent}
+                    onChange={e => setTrackingForm(f => ({ ...f, date_sent: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date Commission Received</label>
+                  <input
+                    type="date"
+                    value={trackingForm.date_received}
+                    onChange={e => setTrackingForm(f => ({ ...f, date_received: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Base Commission Received ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={String(trackingInv.amount_due)}
+                    value={trackingForm.base_commission_received}
+                    onChange={e => setTrackingForm(f => ({ ...f, base_commission_received: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">MGA Fee Received ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={trackingForm.mga_fee_received}
+                    onChange={e => setTrackingForm(f => ({ ...f, mga_fee_received: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+              {trackingError && <p className="text-sm text-red-600">{trackingError}</p>}
+              <div className="flex gap-3 justify-end pt-2">
+                <button type="button" onClick={() => setTrackingInv(null)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={trackingSaving}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {trackingSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Stub tabs */}
       {['comments'].includes(activeTab) && (

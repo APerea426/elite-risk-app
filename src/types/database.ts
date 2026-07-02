@@ -107,6 +107,10 @@ export interface Invoice {
   pdf_url: string | null;
   created_by: string;
   created_at: string;
+  date_sent: string | null;
+  base_commission_received: number | null;
+  mga_fee_received: number | null;
+  date_received: string | null;
 }
 
 export interface ProgramStructure {
