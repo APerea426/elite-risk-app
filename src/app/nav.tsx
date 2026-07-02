@@ -63,6 +63,7 @@ export default function Nav({ user }: NavProps) {
                 <span className="mx-2 text-indigo-600">|</span>
                 <Link href="/admin/activity-log" className={linkClass('/admin/activity-log')}>Activity Log</Link>
                 <Link href="/admin/users" className={linkClass('/admin/users')}>Users</Link>
+                <Link href="/admin/settings" className={linkClass('/admin/settings')}>Settings</Link>
               </>
             )}
           </div>

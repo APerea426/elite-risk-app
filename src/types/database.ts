@@ -69,6 +69,46 @@ export interface PremiumLossHistory {
   created_at: string;
 }
 
+export interface CommissionSettings {
+  id: string;
+  client_id: string | null;
+  base_commission_rate: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface Commission {
+  id: string;
+  client_id: string;
+  premium_amount: number;
+  base_commission_rate: number;
+  base_commission_amount: number;
+  mga_fee: number;
+  total_commission: number;
+  policy_period: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export type InvoiceStatus = 'outstanding' | 'paid';
+
+export interface Invoice {
+  id: string;
+  invoice_number: number;
+  client_id: string;
+  commission_id: string;
+  amount_due: number;
+  date_issued: string;
+  due_date: string | null;
+  status: InvoiceStatus;
+  paid_at: string | null;
+  paid_by: string | null;
+  pdf_url: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Client, Coverage, PremiumLossHistory, ProgramType } from '@/types/database';
+import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice } from '@/types/database';
 import ProgramTypePicker, {
   computeProgramType,
   parseProgramType,
@@ -61,14 +61,36 @@ interface Props {
   client: Client;
   coverages: Coverage[];
   history: PremiumLossHistory[];
+  commissions: Commission[];
+  invoices: Invoice[];
+  effectiveRate: number;
 }
 
-export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory }: Props) {
+export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [client, setClient] = useState(initialClient);
   const [coverages, setCoverages] = useState(initialCoverages);
   const [history, setHistory] = useState(initialHistory);
+  const [commissions, setCommissions] = useState(initialCommissions);
+  const [invoices, setInvoices] = useState(initialInvoices);
   const [error, setError] = useState('');
+
+  // Commission form state
+  const [commOpen, setCommOpen] = useState(false);
+  const [commForm, setCommForm] = useState({
+    policy_period: '',
+    premium_amount: '',
+    base_commission_rate: String(Math.round(effectiveRate * 100)),
+    mga_fee: '0',
+    due_date: '',
+    notes: '',
+  });
+  const [commSaving, setCommSaving] = useState(false);
+  const [commError, setCommError] = useState('');
+  const [lastInvoiceNum, setLastInvoiceNum] = useState<number | null>(null);
+
+  // Invoice state
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
   // Overview edit state
   const [editOpen, setEditOpen] = useState(false);
@@ -218,6 +240,57 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       setHistory(prev => prev.filter(r => r.id !== historyId));
     }
     setDeletingHistoryId(null);
+  }
+
+  function openNewComm() {
+    const due = new Date();
+    due.setDate(due.getDate() + 30);
+    setCommForm({
+      policy_period: '',
+      premium_amount: '',
+      base_commission_rate: String(Math.round(effectiveRate * 100)),
+      mga_fee: '0',
+      due_date: due.toISOString().split('T')[0],
+      notes: '',
+    });
+    setCommError('');
+    setLastInvoiceNum(null);
+    setCommOpen(true);
+  }
+
+  async function handleGenerateInvoice(e: React.FormEvent) {
+    e.preventDefault();
+    setCommSaving(true);
+    setCommError('');
+    const res = await fetch(`/api/clients/${client.id}/commissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        premium_amount: Number(commForm.premium_amount),
+        base_commission_rate: Number(commForm.base_commission_rate) / 100,
+        mga_fee: Number(commForm.mga_fee) || 0,
+        policy_period: commForm.policy_period || null,
+        due_date: commForm.due_date || null,
+        notes: commForm.notes || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setCommError(data.error); setCommSaving(false); return; }
+    setCommissions(prev => [data.commission, ...prev]);
+    setInvoices(prev => [data.invoice, ...prev]);
+    setLastInvoiceNum(data.invoice.invoice_number);
+    setCommOpen(false);
+    setCommSaving(false);
+  }
+
+  async function handleMarkPaid(invoiceId: string) {
+    setMarkingPaidId(invoiceId);
+    const res = await fetch(`/api/invoices/${invoiceId}/paid`, { method: 'PATCH' });
+    const data = await res.json();
+    if (res.ok) {
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? data : inv));
+    }
+    setMarkingPaidId(null);
   }
 
   const tabClass = (id: TabId) =>
@@ -434,8 +507,126 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
         </div>
       )}
 
+      {/* Tab: Commissions */}
+      {activeTab === 'commissions' && (
+        <div className="space-y-4">
+          {lastInvoiceNum && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700">
+              Invoice #{lastInvoiceNum} generated successfully.
+            </div>
+          )}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-700">Commission Records</h2>
+              <button
+                onClick={openNewComm}
+                className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+              >
+                New Commission
+              </button>
+            </div>
+            {commissions.length === 0 ? (
+              <div className="p-10 text-center text-slate-400 text-sm">No commissions yet.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="px-6 py-3 text-left">Policy Period</th>
+                    <th className="px-6 py-3 text-right">Premium</th>
+                    <th className="px-6 py-3 text-right">Rate</th>
+                    <th className="px-6 py-3 text-right">Base Comm.</th>
+                    <th className="px-6 py-3 text-right">MGA Fee</th>
+                    <th className="px-6 py-3 text-right">Total</th>
+                    <th className="px-6 py-3 text-left">Invoice</th>
+                    <th className="px-6 py-3 text-left">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {commissions.map(comm => {
+                    const inv = invoices.find(i => i.commission_id === comm.id);
+                    return (
+                      <tr key={comm.id}>
+                        <td className="px-6 py-4 text-slate-700">{comm.policy_period ?? '—'}</td>
+                        <td className="px-6 py-4 text-right text-slate-700">{fmt(comm.premium_amount)}</td>
+                        <td className="px-6 py-4 text-right text-slate-500">{(comm.base_commission_rate * 100).toFixed(1)}%</td>
+                        <td className="px-6 py-4 text-right text-slate-700">{fmt(comm.base_commission_amount)}</td>
+                        <td className="px-6 py-4 text-right text-slate-700">{comm.mga_fee > 0 ? fmt(comm.mga_fee) : '—'}</td>
+                        <td className="px-6 py-4 text-right font-medium text-slate-800">{fmt(comm.total_commission)}</td>
+                        <td className="px-6 py-4">
+                          {inv ? (
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              #{inv.invoice_number} {inv.status === 'paid' ? '✓' : '· Outstanding'}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-6 py-4 text-slate-500">{new Date(comm.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Invoices */}
+      {activeTab === 'invoices' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100">
+            <h2 className="text-sm font-semibold text-slate-700">Invoices</h2>
+          </div>
+          {invoices.length === 0 ? (
+            <div className="p-10 text-center text-slate-400 text-sm">No invoices yet. Generate one from the Commissions tab.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-6 py-3 text-left">Invoice #</th>
+                  <th className="px-6 py-3 text-left">Date Issued</th>
+                  <th className="px-6 py-3 text-left">Due Date</th>
+                  <th className="px-6 py-3 text-right">Amount Due</th>
+                  <th className="px-6 py-3 text-left">Status</th>
+                  <th className="px-6 py-3 text-left">Paid</th>
+                  <th className="px-6 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoices.map(inv => (
+                  <tr key={inv.id}>
+                    <td className="px-6 py-4 font-medium text-slate-800">#{inv.invoice_number}</td>
+                    <td className="px-6 py-4 text-slate-600">{new Date(inv.date_issued).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 text-slate-600">{inv.due_date ? new Date(inv.due_date + 'T00:00:00').toLocaleDateString() : '—'}</td>
+                    <td className="px-6 py-4 text-right font-medium text-slate-800">{fmt(inv.amount_due)}</td>
+                    <td className="px-6 py-4">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {inv.status === 'paid' ? 'Paid' : 'Outstanding'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-500 text-xs">
+                      {inv.paid_at ? new Date(inv.paid_at).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {inv.status === 'outstanding' && (
+                        <button
+                          onClick={() => handleMarkPaid(inv.id)}
+                          disabled={markingPaidId === inv.id}
+                          className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md disabled:opacity-50"
+                        >
+                          {markingPaidId === inv.id ? 'Marking…' : 'Mark Paid'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* Stub tabs */}
-      {['commissions', 'invoices', 'engagement', 'structure', 'profitability', 'comments'].includes(activeTab) && (
+      {['engagement', 'structure', 'profitability', 'comments'].includes(activeTab) && (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
           <p className="text-sm">Coming in Module {TABS.find(t => t.id === activeTab)?.module}.</p>
         </div>
@@ -590,6 +781,129 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
           </div>
         </div>
       )}
+
+      {/* New Commission Modal */}
+      {commOpen && (() => {
+        const premAmt = Number(commForm.premium_amount) || 0;
+        const rate = Number(commForm.base_commission_rate) / 100;
+        const mgaFee = Number(commForm.mga_fee) || 0;
+        const baseComm = premAmt * rate;
+        const total = baseComm + mgaFee;
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 overflow-y-auto py-8">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 m-4">
+              <h2 className="text-lg font-semibold text-slate-800 mb-4">New Commission & Invoice</h2>
+              <form onSubmit={handleGenerateInvoice} className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Policy Period</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 2025-2026"
+                      value={commForm.policy_period}
+                      onChange={e => setCommForm(f => ({ ...f, policy_period: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
+                    <input
+                      type="date"
+                      value={commForm.due_date}
+                      onChange={e => setCommForm(f => ({ ...f, due_date: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Premium Amount ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    placeholder="500000"
+                    value={commForm.premium_amount}
+                    onChange={e => setCommForm(f => ({ ...f, premium_amount: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Commission Rate (%)</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        required
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={commForm.base_commission_rate}
+                        onChange={e => setCommForm(f => ({ ...f, base_commission_rate: e.target.value }))}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-slate-400 text-sm">%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">MGA Fee ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={commForm.mga_fee}
+                      onChange={e => setCommForm(f => ({ ...f, mga_fee: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Live calculation */}
+                {premAmt > 0 && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm space-y-1">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Base ({(rate * 100).toFixed(1)}%)</span>
+                      <span>{fmt(baseComm)}</span>
+                    </div>
+                    {mgaFee > 0 && (
+                      <div className="flex justify-between text-slate-600">
+                        <span>MGA Fee</span>
+                        <span>{fmt(mgaFee)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-semibold text-slate-800 border-t border-slate-200 pt-1 mt-1">
+                      <span>Total Commission</span>
+                      <span>{fmt(total)}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                  <textarea
+                    value={commForm.notes}
+                    onChange={e => setCommForm(f => ({ ...f, notes: e.target.value }))}
+                    rows={2}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {commError && <p className="text-sm text-red-600">{commError}</p>}
+                <div className="flex gap-3 justify-end pt-2">
+                  <button type="button" onClick={() => setCommOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                  <button
+                    type="submit"
+                    disabled={commSaving || premAmt <= 0}
+                    className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                  >
+                    {commSaving ? 'Generating…' : 'Generate Invoice'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Add/Edit History Modal */}
       {historyOpen && (
