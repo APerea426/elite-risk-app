@@ -45,12 +45,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const body = await request.json();
     const {
-      letter_type,      // 'cell' | 'standalone'
-      date,             // e.g. "July 2, 2026"
-      greeting_name,    // e.g. "John Smith"
+      letter_type,         // 'cell' | 'standalone'
+      date,                // e.g. "July 2, 2026"
+      client_name,         // salutation name
       company_name,
       carrier_name,
       policy_description,
+      management_fee,      // number, e.g. 45000
       set_engagement_date, // boolean — update client.engagement_letter_date
     } = body;
 
@@ -68,12 +69,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `Template file not found: ${templateFile}` }, { status: 500 });
     }
 
+    // Format fee as "$   45,000" to match template's table cell format (3 spaces after $)
+    const defaultFee = letter_type === 'cell' ? 45000 : 55000;
+    const feeValue = typeof management_fee === 'number' && management_fee > 0 ? management_fee : defaultFee;
+    const feeFormatted = `$   ${feeValue.toLocaleString('en-US')}`;
+    const templateFee = letter_type === 'cell' ? '$   45,000' : '$   55,000';
+
     const replacements: Record<string, string> = {
       'DATE': date || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-      'Client Name,': `${greeting_name?.trim() || company_name.trim()},`,
+      'Client Name,': `${(client_name ?? '').trim() || company_name.trim()},`,
       '(Company Name)': company_name.trim(),
       '(Carrier Name)': carrier_name?.trim() || 'Victoria Corporate Ltd',
       '(Captive Policy Description)': policy_description?.trim() || '',
+      [templateFee]: feeFormatted,
     };
 
     const buffer = fillTemplate(templatePath, replacements);

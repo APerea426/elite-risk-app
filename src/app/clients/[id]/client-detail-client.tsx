@@ -79,12 +79,18 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
   const [letterType, setLetterType] = useState<'cell' | 'standalone'>('cell');
   const [form, setForm] = useState({
     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-    greeting_name: client.contact_name ?? '',
+    client_name: client.contact_name ?? '',
     company_name: client.company_name,
     carrier_name: carrierDefault,
     policy_description: '',
+    management_fee: '45000',
     set_engagement_date: true,
   });
+
+  function switchLetterType(type: 'cell' | 'standalone') {
+    setLetterType(type);
+    setForm(f => ({ ...f, management_fee: type === 'cell' ? '45000' : '55000' }));
+  }
   const [downloading, setDownloading] = useState(false);
   const [engError, setEngError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -97,7 +103,7 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
     const res = await fetch(`/api/clients/${clientId}/engagement-letter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ letter_type: letterType, ...form }),
+      body: JSON.stringify({ letter_type: letterType, ...form, management_fee: Number(form.management_fee) }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -135,7 +141,7 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => setLetterType(opt.value)}
+                onClick={() => switchLetterType(opt.value)}
                 className={`flex-1 text-left px-4 py-3 rounded-lg border transition-colors ${
                   letterType === opt.value
                     ? 'bg-indigo-50 border-indigo-600 text-indigo-800'
@@ -162,13 +168,13 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Greeting Name</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Client Name <span className="text-xs text-slate-400">(salutation)</span></label>
             <input
               type="text"
-              value={form.greeting_name}
-              onChange={e => setForm(f => ({ ...f, greeting_name: e.target.value }))}
+              value={form.client_name}
+              onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="Contact name for 'Dear [Name],'"
+              placeholder="Name that appears after 'Dear'"
             />
           </div>
           <div>
@@ -190,6 +196,18 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="Victoria Corporate Ltd"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Management Fee ($)</label>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              value={form.management_fee}
+              onChange={e => setForm(f => ({ ...f, management_fee: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <p className="text-xs text-slate-400 mt-1">Applies to both Year 1 and ongoing management fee lines</p>
           </div>
         </div>
 
