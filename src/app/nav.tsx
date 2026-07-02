@@ -55,7 +55,7 @@ export default function Nav({ user }: NavProps) {
           {/* Center: Nav links */}
           <div className="flex items-center gap-1">
             <Link href="/dashboard" className={linkClass('/dashboard')}>Dashboard</Link>
-            <span className={disabledClass}>Prospects</span>
+            <Link href="/prospects" className={linkClass('/prospects')}>Prospects</Link>
             <span className={disabledClass}>Clients</span>
             <span className={disabledClass} title="Coming soon">🔔</span>
             {user.role === 'admin' && (

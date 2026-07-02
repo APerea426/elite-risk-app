@@ -10,6 +10,38 @@ export interface User {
   created_at: string;
 }
 
+export type ProspectStatus = 'active' | 'inactive' | 'converted';
+
+export interface Prospect {
+  id: string;
+  company_name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  notes: string | null;
+  status: ProspectStatus;
+  converted_to_client_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Client {
+  id: string;
+  prospect_id: string | null;
+  company_name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  program_type: string;
+  carrier: string | null;
+  notes: string | null;
+  engagement_letter_date: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;
