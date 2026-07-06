@@ -988,7 +988,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                                     Individual Losses — {row.year}
                                     {programStructure && (
                                       <span className="ml-2 font-normal normal-case text-slate-400">
-                                        Captive layer: {fmt(programStructure.captive_retention)} · Carrier layer: excess above
+                                        Captive layer: {fmt(programStructure.captive_retention)} · Excess layer: above retention
                                       </span>
                                     )}
                                   </p>
@@ -1011,7 +1011,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                                         <th className="px-4 py-2 text-left">Description</th>
                                         <th className="px-4 py-2 text-right">Loss Amount</th>
                                         <th className="px-4 py-2 text-right">Captive Layer</th>
-                                        <th className="px-4 py-2 text-right">Carrier Layer</th>
+                                        <th className="px-4 py-2 text-right">Excess Layer</th>
                                         <th className="px-4 py-2 text-left">Notes</th>
                                         <th className="px-4 py-2"></th>
                                       </tr>
@@ -1068,7 +1068,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                                 )}
                                 {!programStructure && (
                                   <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-700">
-                                    Set up a Program Structure to automatically split losses between captive and carrier layers.
+                                    Set up a Program Structure to automatically split losses between captive and excess layers.
                                   </div>
                                 )}
                               </div>
@@ -2263,7 +2263,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
               </h3>
               {programStructure && (
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Captive retention: {fmt(programStructure.captive_retention)} · excess goes to carrier
+                  Captive retention: {fmt(programStructure.captive_retention)} · excess goes to excess layer
                 </p>
               )}
             </div>
@@ -2297,7 +2297,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                       Captive: {fmt(Math.min(Number(lossForm.loss_amount), programStructure.captive_retention))}
                     </span>
                     <span className="text-amber-600">
-                      Carrier: {fmt(Math.max(0, Number(lossForm.loss_amount) - programStructure.captive_retention))}
+                      Excess: {fmt(Math.max(0, Number(lossForm.loss_amount) - programStructure.captive_retention))}
                     </span>
                   </div>
                 )}
