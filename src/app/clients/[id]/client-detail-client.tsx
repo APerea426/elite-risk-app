@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection } from '@/types/database';
+import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection, BrokerFee } from '@/types/database';
 import ProgramTypePicker, {
   computeProgramType,
   parseProgramType,
@@ -66,6 +66,7 @@ interface Props {
   effectiveRate: number;
   programStructure: ProgramStructure | null;
   latestProjection: ProfitabilityProjection | null;
+  brokerFees: BrokerFee[];
 }
 
 const fmt2 = (n: number) =>
@@ -256,7 +257,7 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
   );
 }
 
-export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection }: Props) {
+export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection, brokerFees: initialBrokerFees }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [client, setClient] = useState(initialClient);
   const [coverages, setCoverages] = useState(initialCoverages);
@@ -341,6 +342,71 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [projecting, setProjecting] = useState(false);
   const [projectionError, setProjectionError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Broker fees state
+  const [brokerFees, setBrokerFees] = useState<BrokerFee[]>(initialBrokerFees);
+  const [feeModalOpen, setFeeModalOpen] = useState(false);
+  const [editingFee, setEditingFee] = useState<BrokerFee | null>(null);
+  const [feeForm, setFeeForm] = useState({ description: '', amount: '', fee_date: '', amount_received: '', date_received: '', notes: '' });
+  const [feeSaving, setFeeSaving] = useState(false);
+  const [feeError, setFeeError] = useState('');
+  const [deletingFeeId, setDeletingFeeId] = useState<string | null>(null);
+
+  function openAddFee() {
+    setEditingFee(null);
+    setFeeForm({ description: '', amount: '', fee_date: '', amount_received: '', date_received: '', notes: '' });
+    setFeeError('');
+    setFeeModalOpen(true);
+  }
+
+  function openEditFee(fee: BrokerFee) {
+    setEditingFee(fee);
+    setFeeForm({
+      description: fee.description,
+      amount: String(fee.amount),
+      fee_date: fee.fee_date ?? '',
+      amount_received: fee.amount_received != null ? String(fee.amount_received) : '',
+      date_received: fee.date_received ?? '',
+      notes: fee.notes ?? '',
+    });
+    setFeeError('');
+    setFeeModalOpen(true);
+  }
+
+  async function handleSaveFee(e: React.FormEvent) {
+    e.preventDefault();
+    setFeeSaving(true);
+    setFeeError('');
+    const body = {
+      description: feeForm.description,
+      amount: Number(feeForm.amount),
+      fee_date: feeForm.fee_date || null,
+      amount_received: feeForm.amount_received !== '' ? Number(feeForm.amount_received) : null,
+      date_received: feeForm.date_received || null,
+      notes: feeForm.notes || null,
+    };
+    const url = editingFee
+      ? `/api/clients/${client.id}/broker-fees/${editingFee.id}`
+      : `/api/clients/${client.id}/broker-fees`;
+    const method = editingFee ? 'PATCH' : 'POST';
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { setFeeError(data.error); setFeeSaving(false); return; }
+    if (editingFee) {
+      setBrokerFees(prev => prev.map(f => f.id === data.id ? data : f));
+    } else {
+      setBrokerFees(prev => [data, ...prev]);
+    }
+    setFeeModalOpen(false);
+    setFeeSaving(false);
+  }
+
+  async function handleDeleteFee(feeId: string) {
+    setDeletingFeeId(feeId);
+    const res = await fetch(`/api/clients/${client.id}/broker-fees/${feeId}`, { method: 'DELETE' });
+    if (res.ok) setBrokerFees(prev => prev.filter(f => f.id !== feeId));
+    setDeletingFeeId(null);
+  }
 
   // Overview edit state
   const [editOpen, setEditOpen] = useState(false);
@@ -1030,6 +1096,83 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
               </div>
             )}
           </div>
+
+          {/* Additional Broker Fees */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">Additional Broker Fees</h2>
+                <p className="text-xs text-slate-400 mt-0.5">One-off fees and referral commissions outside the standard structure</p>
+              </div>
+              <button
+                onClick={openAddFee}
+                className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Add Fee
+              </button>
+            </div>
+            {brokerFees.length === 0 ? (
+              <div className="p-10 text-center text-slate-400 text-sm">No additional fees yet.</div>
+            ) : (
+              <>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="px-6 py-3 text-left">Description</th>
+                      <th className="px-6 py-3 text-left">Date</th>
+                      <th className="px-6 py-3 text-right">Amount</th>
+                      <th className="px-6 py-3 text-right">Received</th>
+                      <th className="px-6 py-3 text-left">Date Received</th>
+                      <th className="px-6 py-3 text-left">Notes</th>
+                      <th className="px-6 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {brokerFees.map((fee, idx) => (
+                      <tr key={fee.id} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                        <td className="px-6 py-3 font-medium text-slate-800">{fee.description}</td>
+                        <td className="px-6 py-3 text-slate-500 text-xs">
+                          {fee.fee_date ? new Date(fee.fee_date + 'T00:00:00').toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-6 py-3 text-right text-slate-700">{fmt(fee.amount)}</td>
+                        <td className="px-6 py-3 text-right">
+                          {fee.amount_received != null
+                            ? <span className="text-green-700 font-medium">{fmt(fee.amount_received)}</span>
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-6 py-3 text-slate-500 text-xs">
+                          {fee.date_received ? new Date(fee.date_received + 'T00:00:00').toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-6 py-3 text-slate-400 text-xs">{fee.notes ?? '—'}</td>
+                        <td className="px-6 py-3 text-right">
+                          <div className="flex items-center gap-3 justify-end">
+                            <button onClick={() => openEditFee(fee)} className="text-xs text-indigo-600 hover:underline">Edit</button>
+                            <button
+                              onClick={() => handleDeleteFee(fee.id)}
+                              disabled={deletingFeeId === fee.id}
+                              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                            >
+                              {deletingFeeId === fee.id ? 'Deleting…' : 'Delete'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-100 border-t border-slate-200 text-sm font-semibold">
+                    <tr>
+                      <td colSpan={2} className="px-6 py-3 text-slate-500 text-xs uppercase tracking-wide">Total</td>
+                      <td className="px-6 py-3 text-right text-slate-800">{fmt(brokerFees.reduce((s, f) => s + f.amount, 0))}</td>
+                      <td className="px-6 py-3 text-right text-green-700">{fmt(brokerFees.reduce((s, f) => s + (f.amount_received ?? 0), 0))}</td>
+                      <td colSpan={3} className="px-6 py-3 text-right text-amber-600 text-xs">
+                        {fmt(brokerFees.reduce((s, f) => s + f.amount - (f.amount_received ?? 0), 0))} outstanding
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -1400,6 +1543,94 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       {activeTab === 'engagement' && (() => {
         return <EngagementTab clientId={client.id} client={client} />;
       })()}
+
+      {/* Broker Fee Modal */}
+      {feeModalOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">
+              {editingFee ? 'Edit Broker Fee' : 'Add Broker Fee'}
+            </h2>
+            <form onSubmit={handleSaveFee} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={feeForm.description}
+                  onChange={e => setFeeForm(f => ({ ...f, description: e.target.value }))}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. Referral fee, Placement fee"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount ($) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={feeForm.amount}
+                    onChange={e => setFeeForm(f => ({ ...f, amount: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="5000"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Fee Date</label>
+                  <input
+                    type="date"
+                    value={feeForm.fee_date}
+                    onChange={e => setFeeForm(f => ({ ...f, fee_date: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Amount Received ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={feeForm.amount_received}
+                    onChange={e => setFeeForm(f => ({ ...f, amount_received: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Date Received</label>
+                  <input
+                    type="date"
+                    value={feeForm.date_received}
+                    onChange={e => setFeeForm(f => ({ ...f, date_received: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                <textarea
+                  value={feeForm.notes}
+                  onChange={e => setFeeForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              {feeError && <p className="text-sm text-red-600">{feeError}</p>}
+              <div className="flex gap-3 justify-end pt-2">
+                <button type="button" onClick={() => setFeeModalOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={feeSaving}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {feeSaving ? 'Saving…' : editingFee ? 'Save Changes' : 'Add Fee'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Invoice Tracking Modal */}
       {trackingInv && (

@@ -179,6 +179,19 @@ export interface ProfitabilityProjection {
   created_at: string;
 }
 
+export interface BrokerFee {
+  id: string;
+  client_id: string;
+  description: string;
+  amount: number;
+  fee_date: string | null;
+  amount_received: number | null;
+  date_received: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;
