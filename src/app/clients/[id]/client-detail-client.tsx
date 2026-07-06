@@ -863,28 +863,37 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                       <th className="px-4 py-3 text-left whitespace-nowrap">Invoice</th>
                       <th className="px-4 py-3 text-left whitespace-nowrap">Date Sent</th>
                       <th className="px-4 py-3 text-left whitespace-nowrap">Date Received</th>
-                      <th className="px-4 py-3"></th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">Edit</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {commissions.map(comm => {
                       const inv = invoices.find(i => i.commission_id === comm.id);
+                      const clickable = inv ? 'cursor-pointer hover:bg-indigo-50 group' : '';
                       return (
-                        <tr key={comm.id}>
+                        <tr key={comm.id} className="transition-colors">
                           <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{comm.policy_period ?? '—'}</td>
                           <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{fmt(comm.premium_amount)}</td>
                           <td className="px-4 py-3 text-right text-slate-500">{(comm.base_commission_rate * 100).toFixed(1)}%</td>
                           <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{fmt(comm.base_commission_amount)}</td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <td
+                            className={`px-4 py-3 text-right whitespace-nowrap ${clickable}`}
+                            onClick={() => inv && openTracking(inv)}
+                            title={inv ? 'Click to edit' : ''}
+                          >
                             {inv?.base_commission_received != null
                               ? <span className="text-green-700 font-medium">{fmt(inv.base_commission_received)}</span>
-                              : <span className="text-slate-300">—</span>}
+                              : <span className="text-slate-300 group-hover:text-indigo-400">— click to add</span>}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">{comm.mga_fee > 0 ? fmt(comm.mga_fee) : '—'}</td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <td
+                            className={`px-4 py-3 text-right whitespace-nowrap ${clickable}`}
+                            onClick={() => inv && openTracking(inv)}
+                            title={inv ? 'Click to edit' : ''}
+                          >
                             {inv?.mga_fee_received != null
                               ? <span className="text-green-700 font-medium">{fmt(inv.mga_fee_received)}</span>
-                              : <span className="text-slate-300">—</span>}
+                              : <span className="text-slate-300 group-hover:text-indigo-400">— click to add</span>}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-800 whitespace-nowrap">{fmt(comm.total_commission)}</td>
                           <td className="px-4 py-3 whitespace-nowrap">
@@ -894,19 +903,34 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                               </span>
                             ) : '—'}
                           </td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
-                            {inv?.date_sent ? new Date(inv.date_sent + 'T00:00:00').toLocaleDateString() : <span className="text-slate-300">—</span>}
+                          <td
+                            className={`px-4 py-3 whitespace-nowrap text-xs ${clickable}`}
+                            onClick={() => inv && openTracking(inv)}
+                            title={inv ? 'Click to edit' : ''}
+                          >
+                            {inv?.date_sent
+                              ? <span className="text-slate-600">{new Date(inv.date_sent + 'T00:00:00').toLocaleDateString()}</span>
+                              : <span className="text-slate-300 group-hover:text-indigo-400">— click to add</span>}
                           </td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
-                            {inv?.date_received ? new Date(inv.date_received + 'T00:00:00').toLocaleDateString() : <span className="text-slate-300">—</span>}
+                          <td
+                            className={`px-4 py-3 whitespace-nowrap text-xs ${clickable}`}
+                            onClick={() => inv && openTracking(inv)}
+                            title={inv ? 'Click to edit' : ''}
+                          >
+                            {inv?.date_received
+                              ? <span className="text-slate-600">{new Date(inv.date_received + 'T00:00:00').toLocaleDateString()}</span>
+                              : <span className="text-slate-300 group-hover:text-indigo-400">— click to add</span>}
                           </td>
-                          <td className="px-4 py-3 text-right">
+                          <td className="px-4 py-3 text-center">
                             {inv && (
                               <button
                                 onClick={() => openTracking(inv)}
-                                className="text-xs text-indigo-600 hover:underline whitespace-nowrap"
+                                className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors"
+                                title="Edit tracking info"
                               >
-                                Log
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                                  <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.263a1.75 1.75 0 0 0 0-2.474ZM3.75 12.5a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/>
+                                </svg>
                               </button>
                             )}
                           </td>
