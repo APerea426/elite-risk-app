@@ -835,6 +835,94 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
               Invoice #{lastInvoiceNum} generated successfully.
             </div>
           )}
+
+          {/* Yearly Summary */}
+          {commissions.length > 0 && (() => {
+            const byYear: Record<number, { baseInvoiced: number; baseReceived: number; mgaInvoiced: number; mgaReceived: number }> = {};
+            for (const comm of commissions) {
+              const inv = invoices.find(i => i.commission_id === comm.id);
+              const year = inv ? new Date(inv.date_issued).getFullYear() : new Date(comm.created_at).getFullYear();
+              if (!byYear[year]) byYear[year] = { baseInvoiced: 0, baseReceived: 0, mgaInvoiced: 0, mgaReceived: 0 };
+              byYear[year].baseInvoiced += comm.base_commission_amount;
+              byYear[year].baseReceived += inv?.base_commission_received ?? 0;
+              byYear[year].mgaInvoiced += comm.mga_fee;
+              byYear[year].mgaReceived += inv?.mga_fee_received ?? 0;
+            }
+            const years = Object.keys(byYear).map(Number).sort((a, b) => b - a);
+            return (
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100">
+                  <h2 className="text-sm font-semibold text-slate-700">Annual Summary</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Invoiced vs. received by year</p>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="px-6 py-3 text-left">Year</th>
+                      <th className="px-6 py-3 text-right">Base Invoiced</th>
+                      <th className="px-6 py-3 text-right">Base Received</th>
+                      <th className="px-6 py-3 text-right">Base Outstanding</th>
+                      <th className="px-6 py-3 text-right">MGA Invoiced</th>
+                      <th className="px-6 py-3 text-right">MGA Received</th>
+                      <th className="px-6 py-3 text-right">MGA Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {years.map((year, idx) => {
+                      const row = byYear[year];
+                      const baseOut = row.baseInvoiced - row.baseReceived;
+                      const mgaOut = row.mgaInvoiced - row.mgaReceived;
+                      return (
+                        <tr key={year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                          <td className="px-6 py-3 font-semibold text-slate-800">{year}</td>
+                          <td className="px-6 py-3 text-right text-slate-700">{fmt(row.baseInvoiced)}</td>
+                          <td className="px-6 py-3 text-right">
+                            <span className={row.baseReceived > 0 ? 'text-green-700 font-medium' : 'text-slate-400'}>{fmt(row.baseReceived)}</span>
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <span className={baseOut > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}>{fmt(baseOut)}</span>
+                          </td>
+                          <td className="px-6 py-3 text-right text-slate-700">{row.mgaInvoiced > 0 ? fmt(row.mgaInvoiced) : '—'}</td>
+                          <td className="px-6 py-3 text-right">
+                            {row.mgaInvoiced > 0
+                              ? <span className={row.mgaReceived > 0 ? 'text-green-700 font-medium' : 'text-slate-400'}>{fmt(row.mgaReceived)}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            {row.mgaInvoiced > 0
+                              ? <span className={mgaOut > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}>{fmt(mgaOut)}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {years.length > 1 && (() => {
+                    const tot = years.reduce((acc, y) => ({
+                      baseInvoiced: acc.baseInvoiced + byYear[y].baseInvoiced,
+                      baseReceived: acc.baseReceived + byYear[y].baseReceived,
+                      mgaInvoiced: acc.mgaInvoiced + byYear[y].mgaInvoiced,
+                      mgaReceived: acc.mgaReceived + byYear[y].mgaReceived,
+                    }), { baseInvoiced: 0, baseReceived: 0, mgaInvoiced: 0, mgaReceived: 0 });
+                    return (
+                      <tfoot className="bg-slate-100 border-t border-slate-200 text-sm font-semibold">
+                        <tr>
+                          <td className="px-6 py-3 text-slate-600 text-xs uppercase tracking-wide">All Time</td>
+                          <td className="px-6 py-3 text-right text-slate-800">{fmt(tot.baseInvoiced)}</td>
+                          <td className="px-6 py-3 text-right text-green-700">{fmt(tot.baseReceived)}</td>
+                          <td className="px-6 py-3 text-right text-amber-600">{fmt(tot.baseInvoiced - tot.baseReceived)}</td>
+                          <td className="px-6 py-3 text-right text-slate-800">{tot.mgaInvoiced > 0 ? fmt(tot.mgaInvoiced) : '—'}</td>
+                          <td className="px-6 py-3 text-right text-green-700">{tot.mgaInvoiced > 0 ? fmt(tot.mgaReceived) : '—'}</td>
+                          <td className="px-6 py-3 text-right text-amber-600">{tot.mgaInvoiced > 0 ? fmt(tot.mgaInvoiced - tot.mgaReceived) : '—'}</td>
+                        </tr>
+                      </tfoot>
+                    );
+                  })()}
+                </table>
+              </div>
+            );
+          })()}
+
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-700">Commission Records</h2>
