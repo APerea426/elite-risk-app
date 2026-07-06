@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection, BrokerFee, IndividualLoss } from '@/types/database';
 import ProgramTypePicker, {
@@ -1649,17 +1649,40 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{projectionError}</div>
           )}
 
-          {latestProjection && (() => {
-            const { historical, projection, summary, structure } = latestProjection.projection_data;
+          {history.length > 0 && programStructure && (() => {
+            // Always calculate live from current history — never stale
+            const sorted = [...history].sort((a, b) => a.year - b.year);
+            const liveHistorical = sorted.map(row => {
+              const captive_premium = row.premium * programStructure.captive_premium_pct;
+              const excess_premium = row.premium * (1 - programStructure.captive_premium_pct);
+              const captive_losses = Math.min(row.losses, programStructure.captive_retention);
+              const excess_losses = Math.max(0, row.losses - programStructure.captive_retention);
+              const captive_loss_ratio = captive_premium > 0 ? captive_losses / captive_premium : 0;
+              const client_pl = captive_premium - captive_losses;
+              return { year: row.year, premium: row.premium, losses: row.losses, captive_premium, excess_premium, captive_losses, excess_losses, captive_loss_ratio, client_pl };
+            });
+            const totalPremium = sorted.reduce((s, r) => s + r.premium, 0);
+            const totalLosses = sorted.reduce((s, r) => s + r.losses, 0);
+            const avg_historical_loss_rate = totalPremium > 0 ? totalLosses / totalPremium : 0;
+
+            // Forward projection uses stored report if available, otherwise show prompt
+            const storedProjection = latestProjection?.projection_data;
+
+            // Detect if stored projection is stale vs current history
+            const isStale = storedProjection ? sorted.some(r => {
+              const snap = storedProjection.historical.find(h => h.year === r.year);
+              return !snap || Math.round(snap.losses) !== Math.round(r.losses) || Math.round(snap.premium) !== Math.round(r.premium);
+            }) || sorted.length !== storedProjection.historical.length : false;
+
             return (
               <>
-                {/* Summary cards */}
+                {/* Summary cards — always live */}
                 <div className="grid grid-cols-4 gap-4">
                   {[
-                    { label: 'Avg Historical Loss Rate', value: (summary.avg_historical_loss_rate * 100).toFixed(1) + '%' },
-                    { label: 'Captive Premium / yr', value: fmt(structure.new_annual_premium * structure.captive_premium_pct) },
-                    { label: 'Avg Annual Profit', value: fmt2(summary.avg_annual_projected_profit), pos: summary.avg_annual_projected_profit >= 0 },
-                    { label: '5-Year Total Profit', value: fmt2(summary.total_5yr_projected_profit), pos: summary.total_5yr_projected_profit >= 0 },
+                    { label: 'Avg Historical Loss Rate', value: (avg_historical_loss_rate * 100).toFixed(1) + '%' },
+                    { label: 'Captive Premium / yr', value: fmt(programStructure.new_annual_premium * programStructure.captive_premium_pct) },
+                    { label: 'Avg Annual Profit', value: storedProjection ? fmt2(storedProjection.summary.avg_annual_projected_profit) : '—', pos: storedProjection ? storedProjection.summary.avg_annual_projected_profit >= 0 : undefined },
+                    { label: '5-Year Total Profit', value: storedProjection ? fmt2(storedProjection.summary.total_5yr_projected_profit) : '—', pos: storedProjection ? storedProjection.summary.total_5yr_projected_profit >= 0 : undefined },
                   ].map(({ label, value, pos }) => (
                     <div key={label} className="bg-white rounded-xl border border-slate-200 p-4">
                       <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{label}</p>
@@ -1668,10 +1691,18 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   ))}
                 </div>
 
-                {/* Historical table */}
+                {/* Stale warning */}
+                {isStale && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+                    History data has changed since this report was generated. The Historical Analysis below reflects your current data. Click <strong>Regenerate Report</strong> to update the 5-Year Forward Projection.
+                  </div>
+                )}
+
+                {/* Historical table — always live */}
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                   <div className="px-6 py-4 border-b border-slate-100">
                     <h3 className="text-sm font-semibold text-slate-700">Historical Analysis</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Reflects current history data</p>
                   </div>
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
@@ -1687,7 +1718,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {historical.map((row, idx) => (
+                      {liveHistorical.map((row, idx) => (
                         <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
                           <td className="px-4 py-3 font-medium text-slate-800">{row.year}</td>
                           <td className="px-4 py-3 text-right text-slate-700">{fmt(row.premium)}</td>
@@ -1709,43 +1740,52 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   </table>
                 </div>
 
-                {/* Projection table */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-100">
-                    <h3 className="text-sm font-semibold text-slate-700">5-Year Forward Projection</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Based on {summary.years_of_history} {summary.years_of_history === 1 ? 'year' : 'years'} of history · avg loss rate {(summary.avg_historical_loss_rate * 100).toFixed(1)}%</p>
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                      <tr>
-                        <th className="px-4 py-3 text-left">Year</th>
-                        <th className="px-4 py-3 text-right">Captive Premium</th>
-                        <th className="px-4 py-3 text-right">Projected Losses</th>
-                        <th className="px-4 py-3 text-right">Captive Losses</th>
-                        <th className="px-4 py-3 text-right">Expenses</th>
-                        <th className="px-4 py-3 text-right">Net Profit</th>
-                        <th className="px-4 py-3 text-right">Cumulative Profit</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {projection.map((row, idx) => (
-                        <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
-                          <td className="px-4 py-3 font-medium text-slate-800">Year {row.year}</td>
-                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
-                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_total_losses)}</td>
-                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_captive_losses)}</td>
-                          <td className="px-4 py-3 text-right text-slate-700">{fmt(row.expenses)}</td>
-                          <td className={`px-4 py-3 text-right font-medium ${row.net_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                            {fmt2(row.net_profit)}
-                          </td>
-                          <td className={`px-4 py-3 text-right font-medium ${row.cumulative_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                            {fmt2(row.cumulative_profit)}
-                          </td>
+                {/* Forward projection — stored snapshot */}
+                {storedProjection ? (
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100">
+                      <h3 className="text-sm font-semibold text-slate-700">5-Year Forward Projection</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Based on {storedProjection.summary.years_of_history} {storedProjection.summary.years_of_history === 1 ? 'year' : 'years'} of history · avg loss rate {(storedProjection.summary.avg_historical_loss_rate * 100).toFixed(1)}%
+                        {isStale && <span className="text-amber-500 ml-2">· stale — regenerate to update</span>}
+                      </p>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Year</th>
+                          <th className="px-4 py-3 text-right">Captive Premium</th>
+                          <th className="px-4 py-3 text-right">Projected Losses</th>
+                          <th className="px-4 py-3 text-right">Captive Losses</th>
+                          <th className="px-4 py-3 text-right">Expenses</th>
+                          <th className="px-4 py-3 text-right">Net Profit</th>
+                          <th className="px-4 py-3 text-right">Cumulative Profit</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {storedProjection.projection.map((row, idx) => (
+                          <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                            <td className="px-4 py-3 font-medium text-slate-800">Year {row.year}</td>
+                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
+                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_total_losses)}</td>
+                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_captive_losses)}</td>
+                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.expenses)}</td>
+                            <td className={`px-4 py-3 text-right font-medium ${row.net_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                              {fmt2(row.net_profit)}
+                            </td>
+                            <td className={`px-4 py-3 text-right font-medium ${row.cumulative_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                              {fmt2(row.cumulative_profit)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-6 text-center text-sm text-slate-500">
+                    Click <strong>Generate Report</strong> above to calculate the 5-year forward projection.
+                  </div>
+                )}
               </>
             );
           })()}
