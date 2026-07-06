@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection, BrokerFee } from '@/types/database';
+import type { Client, Coverage, PremiumLossHistory, ProgramType, Commission, Invoice, ProgramStructure, ProfitabilityProjection, BrokerFee, IndividualLoss } from '@/types/database';
 import ProgramTypePicker, {
   computeProgramType,
   parseProgramType,
@@ -67,6 +67,7 @@ interface Props {
   programStructure: ProgramStructure | null;
   latestProjection: ProfitabilityProjection | null;
   brokerFees: BrokerFee[];
+  individualLosses: IndividualLoss[];
 }
 
 const fmt2 = (n: number) =>
@@ -257,7 +258,7 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
   );
 }
 
-export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection, brokerFees: initialBrokerFees }: Props) {
+export default function ClientDetailClient({ client: initialClient, coverages: initialCoverages, history: initialHistory, commissions: initialCommissions, invoices: initialInvoices, effectiveRate, programStructure: initialProgramStructure, latestProjection: initialLatestProjection, brokerFees: initialBrokerFees, individualLosses: initialIndividualLosses }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [client, setClient] = useState(initialClient);
   const [coverages, setCoverages] = useState(initialCoverages);
@@ -438,6 +439,96 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [historySaving, setHistorySaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+
+  // Individual losses state
+  const [individualLosses, setIndividualLosses] = useState<IndividualLoss[]>(initialIndividualLosses);
+  const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
+  const [lossModalOpen, setLossModalOpen] = useState(false);
+  const [editingLoss, setEditingLoss] = useState<IndividualLoss | null>(null);
+  const [lossTargetHistoryId, setLossTargetHistoryId] = useState('');
+  const [lossTargetYear, setLossTargetYear] = useState(0);
+  const [lossForm, setLossForm] = useState({ description: '', loss_amount: '', notes: '' });
+  const [lossSaving, setLossSaving] = useState(false);
+  const [lossError, setLossError] = useState('');
+  const [deletingLossId, setDeletingLossId] = useState<string | null>(null);
+
+  function toggleYearExpand(historyId: string) {
+    setExpandedYears(prev => {
+      const next = new Set(prev);
+      if (next.has(historyId)) next.delete(historyId); else next.add(historyId);
+      return next;
+    });
+  }
+
+  function openAddLoss(row: PremiumLossHistory) {
+    setEditingLoss(null);
+    setLossTargetHistoryId(row.id);
+    setLossTargetYear(row.year);
+    setLossForm({ description: '', loss_amount: '', notes: '' });
+    setLossError('');
+    setLossModalOpen(true);
+  }
+
+  function openEditLoss(loss: IndividualLoss) {
+    setEditingLoss(loss);
+    setLossTargetHistoryId(loss.history_id);
+    setLossTargetYear(loss.year);
+    setLossForm({ description: loss.description, loss_amount: String(loss.loss_amount), notes: loss.notes ?? '' });
+    setLossError('');
+    setLossModalOpen(true);
+  }
+
+  async function handleSaveLoss(e: React.FormEvent) {
+    e.preventDefault();
+    setLossSaving(true);
+    setLossError('');
+
+    if (editingLoss) {
+      const res = await fetch(`/api/clients/${client.id}/individual-losses/${editingLoss.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: lossForm.description,
+          loss_amount: Number(lossForm.loss_amount),
+          notes: lossForm.notes || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLossError(data.error); setLossSaving(false); return; }
+      setIndividualLosses(prev => prev.map(l => l.id === editingLoss.id ? data.loss : l));
+      setHistory(prev => prev.map(r => r.id === editingLoss.history_id ? { ...r, losses: data.totalLosses } : r));
+    } else {
+      const res = await fetch(`/api/clients/${client.id}/individual-losses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          history_id: lossTargetHistoryId,
+          year: lossTargetYear,
+          description: lossForm.description,
+          loss_amount: Number(lossForm.loss_amount),
+          notes: lossForm.notes || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setLossError(data.error); setLossSaving(false); return; }
+      setIndividualLosses(prev => [...prev, data.loss]);
+      setHistory(prev => prev.map(r => r.id === lossTargetHistoryId ? { ...r, losses: data.totalLosses } : r));
+    }
+
+    setLossModalOpen(false);
+    setLossSaving(false);
+  }
+
+  async function handleDeleteLoss(loss: IndividualLoss) {
+    setDeletingLossId(loss.id);
+    const res = await fetch(`/api/clients/${client.id}/individual-losses/${loss.id}`, { method: 'DELETE' });
+    if (res.ok) {
+      const data = await res.json();
+      setIndividualLosses(prev => prev.filter(l => l.id !== loss.id));
+      setHistory(prev => prev.map(r => r.id === loss.history_id ? { ...r, losses: data.totalLosses } : r));
+    }
+    setDeletingLossId(null);
+  }
 
   function openEditOverview() {
     const p = parseProgramType(client.program_type, client.carrier);
@@ -816,80 +907,202 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
 
       {/* Tab: History */}
       {activeTab === 'history' && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-700">Premium & Loss History</h2>
-              <p className="text-xs text-slate-400 mt-0.5">5 years of historical data for profitability analysis</p>
+        <div className="space-y-4">
+          {/* Premium & Loss Summary */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">Premium & Loss History</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Click a year row to view and manage individual losses by layer</p>
+              </div>
+              <button
+                onClick={openAddHistory}
+                className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Add Year
+              </button>
             </div>
-            <button
-              onClick={openAddHistory}
-              className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
-            >
-              Add Year
-            </button>
-          </div>
-          {history.length === 0 ? (
-            <div className="p-10 text-center text-slate-400 text-sm">No history data yet. Add a year to get started.</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="px-6 py-3 text-left">Year</th>
-                  <th className="px-6 py-3 text-right">Total Premium</th>
-                  <th className="px-6 py-3 text-right">Total Losses</th>
-                  <th className="px-6 py-3 text-right">Loss Ratio</th>
-                  <th className="px-6 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {history.map(row => (
-                  <tr key={row.id}>
-                    <td className="px-6 py-4 font-medium text-slate-800">{row.year}</td>
-                    <td className="px-6 py-4 text-right text-slate-700">{fmt(row.premium)}</td>
-                    <td className="px-6 py-4 text-right text-slate-700">{fmt(row.losses)}</td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`font-medium ${(row.losses / row.premium) > 0.7 ? 'text-red-600' : 'text-green-700'}`}>
-                        {lossRatio(row.losses, row.premium)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center gap-3 justify-end">
-                        <button onClick={() => openEditHistory(row)} className="text-xs text-indigo-600 hover:underline">Edit</button>
-                        <button
-                          onClick={() => handleDeleteHistory(row.id)}
-                          disabled={deletingHistoryId === row.id}
-                          className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
-                        >
-                          {deletingHistoryId === row.id ? 'Deleting…' : 'Delete'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              {history.length > 1 && (
-                <tfoot className="bg-slate-50 border-t border-slate-200">
+            {history.length === 0 ? (
+              <div className="p-10 text-center text-slate-400 text-sm">No history data yet. Add a year to get started.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                   <tr>
-                    <td className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">5-Yr Avg</td>
-                    <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                      {fmt(history.reduce((s, r) => s + r.premium, 0) / history.length)}
-                    </td>
-                    <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                      {fmt(history.reduce((s, r) => s + r.losses, 0) / history.length)}
-                    </td>
-                    <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                      {lossRatio(
-                        history.reduce((s, r) => s + r.losses, 0),
-                        history.reduce((s, r) => s + r.premium, 0)
-                      )}
-                    </td>
-                    <td></td>
+                    <th className="px-6 py-3 text-left w-8"></th>
+                    <th className="px-6 py-3 text-left">Year</th>
+                    <th className="px-6 py-3 text-right">Total Premium</th>
+                    <th className="px-6 py-3 text-right">Total Losses</th>
+                    <th className="px-6 py-3 text-right">Loss Ratio</th>
+                    <th className="px-6 py-3"></th>
                   </tr>
-                </tfoot>
-              )}
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {history.map(row => {
+                    const rowLosses = individualLosses.filter(l => l.history_id === row.id);
+                    const isExpanded = expandedYears.has(row.id);
+                    return (
+                      <>
+                        <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                          <td className="px-4 py-4 text-center">
+                            <button
+                              onClick={() => toggleYearExpand(row.id)}
+                              className="text-slate-400 hover:text-indigo-600 transition-colors"
+                              title={isExpanded ? 'Collapse losses' : 'View individual losses'}
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                          </td>
+                          <td className="px-6 py-4 font-medium text-slate-800">
+                            {row.year}
+                            {rowLosses.length > 0 && (
+                              <span className="ml-2 text-xs text-indigo-500 font-normal">{rowLosses.length} loss{rowLosses.length !== 1 ? 'es' : ''}</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right text-slate-700">{fmt(row.premium)}</td>
+                          <td className="px-6 py-4 text-right text-slate-700">{fmt(row.losses)}</td>
+                          <td className="px-6 py-4 text-right">
+                            <span className={`font-medium ${(row.losses / row.premium) > 0.7 ? 'text-red-600' : 'text-green-700'}`}>
+                              {lossRatio(row.losses, row.premium)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center gap-3 justify-end">
+                              <button onClick={() => openEditHistory(row)} className="text-xs text-indigo-600 hover:underline">Edit</button>
+                              <button
+                                onClick={() => handleDeleteHistory(row.id)}
+                                disabled={deletingHistoryId === row.id}
+                                className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                              >
+                                {deletingHistoryId === row.id ? 'Deleting…' : 'Delete'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`${row.id}-losses`} className="bg-slate-50">
+                            <td colSpan={6} className="px-6 pb-4 pt-2">
+                              {/* Individual losses sub-table */}
+                              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                                <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between">
+                                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                    Individual Losses — {row.year}
+                                    {programStructure && (
+                                      <span className="ml-2 font-normal normal-case text-slate-400">
+                                        Captive layer: {fmt(programStructure.captive_retention)} · Carrier layer: excess above
+                                      </span>
+                                    )}
+                                  </p>
+                                  <button
+                                    onClick={() => openAddLoss(row)}
+                                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                                  >
+                                    + Add Loss
+                                  </button>
+                                </div>
+                                {rowLosses.length === 0 ? (
+                                  <div className="px-4 py-6 text-center text-xs text-slate-400 bg-white">
+                                    No individual losses recorded.{' '}
+                                    <button onClick={() => openAddLoss(row)} className="text-indigo-500 hover:underline">Add the first one.</button>
+                                  </div>
+                                ) : (
+                                  <table className="w-full text-xs">
+                                    <thead className="bg-slate-50 text-slate-400 uppercase tracking-wide">
+                                      <tr>
+                                        <th className="px-4 py-2 text-left">Description</th>
+                                        <th className="px-4 py-2 text-right">Loss Amount</th>
+                                        <th className="px-4 py-2 text-right">Captive Layer</th>
+                                        <th className="px-4 py-2 text-right">Carrier Layer</th>
+                                        <th className="px-4 py-2 text-left">Notes</th>
+                                        <th className="px-4 py-2"></th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                      {rowLosses.map(loss => (
+                                        <tr key={loss.id}>
+                                          <td className="px-4 py-2.5 text-slate-700 font-medium">{loss.description}</td>
+                                          <td className="px-4 py-2.5 text-right text-slate-700">{fmt(loss.loss_amount)}</td>
+                                          <td className="px-4 py-2.5 text-right">
+                                            {loss.captive_portion != null
+                                              ? <span className="text-blue-700 font-medium">{fmt(loss.captive_portion)}</span>
+                                              : <span className="text-slate-400">—</span>}
+                                          </td>
+                                          <td className="px-4 py-2.5 text-right">
+                                            {loss.carrier_portion != null
+                                              ? <span className={loss.carrier_portion > 0 ? 'text-amber-700 font-medium' : 'text-slate-400'}>{fmt(loss.carrier_portion)}</span>
+                                              : <span className="text-slate-400">—</span>}
+                                          </td>
+                                          <td className="px-4 py-2.5 text-slate-400">{loss.notes ?? '—'}</td>
+                                          <td className="px-4 py-2.5 text-right">
+                                            <div className="flex items-center gap-2 justify-end">
+                                              <button onClick={() => openEditLoss(loss)} className="text-indigo-500 hover:text-indigo-700">Edit</button>
+                                              <button
+                                                onClick={() => handleDeleteLoss(loss)}
+                                                disabled={deletingLossId === loss.id}
+                                                className="text-red-400 hover:text-red-600 disabled:opacity-40"
+                                              >
+                                                {deletingLossId === loss.id ? '…' : 'Delete'}
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50 border-t border-slate-200">
+                                      <tr>
+                                        <td className="px-4 py-2 font-semibold text-slate-500">Total</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-slate-700">{fmt(rowLosses.reduce((s, l) => s + l.loss_amount, 0))}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-blue-700">
+                                          {rowLosses.some(l => l.captive_portion != null)
+                                            ? fmt(rowLosses.reduce((s, l) => s + (l.captive_portion ?? 0), 0))
+                                            : '—'}
+                                        </td>
+                                        <td className="px-4 py-2 text-right font-semibold text-amber-700">
+                                          {rowLosses.some(l => l.carrier_portion != null)
+                                            ? fmt(rowLosses.reduce((s, l) => s + (l.carrier_portion ?? 0), 0))
+                                            : '—'}
+                                        </td>
+                                        <td colSpan={2}></td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                )}
+                                {!programStructure && (
+                                  <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-700">
+                                    Set up a Program Structure to automatically split losses between captive and carrier layers.
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
+                </tbody>
+                {history.length > 1 && (
+                  <tfoot className="bg-slate-50 border-t border-slate-200">
+                    <tr>
+                      <td></td>
+                      <td className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">5-Yr Avg</td>
+                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
+                        {fmt(history.reduce((s, r) => s + r.premium, 0) / history.length)}
+                      </td>
+                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
+                        {fmt(history.reduce((s, r) => s + r.losses, 0) / history.length)}
+                      </td>
+                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
+                        {lossRatio(
+                          history.reduce((s, r) => s + r.losses, 0),
+                          history.reduce((s, r) => s + r.premium, 0)
+                        )}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            )}
+          </div>
         </div>
       )}
 
@@ -2033,6 +2246,81 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
                 >
                   {historySaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Individual Loss Modal */}
+      {lossModalOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">
+                {editingLoss ? 'Edit Loss' : `Add Loss — ${lossTargetYear}`}
+              </h3>
+              {programStructure && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Captive retention: {fmt(programStructure.captive_retention)} · excess goes to carrier
+                </p>
+              )}
+            </div>
+            <form onSubmit={handleSaveLoss} className="space-y-4 px-6 py-5">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Auto accident — vehicle #3"
+                  value={lossForm.description}
+                  onChange={e => setLossForm(f => ({ ...f, description: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Loss Amount</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                  value={lossForm.loss_amount}
+                  onChange={e => setLossForm(f => ({ ...f, loss_amount: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {programStructure && lossForm.loss_amount && !isNaN(Number(lossForm.loss_amount)) && (
+                  <div className="mt-1.5 flex gap-4 text-xs text-slate-500">
+                    <span className="text-blue-600">
+                      Captive: {fmt(Math.min(Number(lossForm.loss_amount), programStructure.captive_retention))}
+                    </span>
+                    <span className="text-amber-600">
+                      Carrier: {fmt(Math.max(0, Number(lossForm.loss_amount) - programStructure.captive_retention))}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Notes <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input
+                  type="text"
+                  placeholder="Claim #, claimant, status…"
+                  value={lossForm.notes}
+                  onChange={e => setLossForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              {lossError && <p className="text-sm text-red-600">{lossError}</p>}
+              <div className="flex justify-end gap-3 pt-1">
+                <button type="button" onClick={() => setLossModalOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={lossSaving}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {lossSaving ? 'Saving…' : editingLoss ? 'Save Changes' : 'Add Loss'}
                 </button>
               </div>
             </form>

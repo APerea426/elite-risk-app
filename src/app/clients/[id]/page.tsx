@@ -19,6 +19,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     programStructureResult,
     latestProjectionResult,
     brokerFeesResult,
+    individualLossesResult,
   ] = await Promise.all([
     supabase.from('clients').select('*').eq('id', id).single(),
     supabase.from('coverages').select('*').eq('client_id', id).order('created_at'),
@@ -30,6 +31,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     supabase.from('program_structures').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('profitability_projections').select('*').eq('client_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('broker_fees').select('*').eq('client_id', id).order('fee_date', { ascending: false }),
+    supabase.from('individual_losses').select('*').eq('client_id', id).order('created_at', { ascending: true }),
   ]);
 
   if (!clientResult.data) redirect('/clients');
@@ -50,6 +52,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       programStructure={programStructureResult.data ?? null}
       latestProjection={latestProjectionResult.data ?? null}
       brokerFees={brokerFeesResult.data ?? []}
+      individualLosses={individualLossesResult.data ?? []}
     />
   );
 }
