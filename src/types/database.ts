@@ -192,6 +192,20 @@ export interface BrokerFee {
   created_at: string;
 }
 
+export interface IndividualLoss {
+  id: string;
+  client_id: string;
+  history_id: string;
+  year: number;
+  description: string;
+  loss_amount: number;
+  captive_portion: number | null;
+  carrier_portion: number | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;
