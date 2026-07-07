@@ -29,6 +29,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!prospect) return NextResponse.json({ error: 'Update returned no data' }, { status: 500 });
 
+    // Sync basic contact fields to shadow client if it exists
+    if (prospect.linked_client_id && !isStatusChange) {
+      const clientSync: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (body.company_name !== undefined) clientSync.company_name = body.company_name;
+      if (body.contact_name !== undefined) clientSync.contact_name = body.contact_name;
+      if (body.contact_email !== undefined) clientSync.contact_email = body.contact_email;
+      if (body.contact_phone !== undefined) clientSync.contact_phone = body.contact_phone;
+      if (body.notes !== undefined) clientSync.notes = body.notes;
+      if (Object.keys(clientSync).length > 1) {
+        await supabase.from('clients').update(clientSync).eq('id', prospect.linked_client_id);
+      }
+    }
+
     await logActivity({
       userId: profile.id,
       actionType: isStatusChange ? 'prospect_status_changed' : 'prospect_updated',

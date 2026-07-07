@@ -21,14 +21,41 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Company name is required' }, { status: 400 });
     }
 
-    const { data: prospect, error } = await supabase
+    // Create prospect record
+    const { data: prospect, error: prospectError } = await supabase
       .from('prospects')
       .insert({ company_name: company_name.trim(), contact_name, contact_email, contact_phone, notes, created_by: profile.id })
       .select()
       .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (prospectError) return NextResponse.json({ error: prospectError.message }, { status: 500 });
     if (!prospect) return NextResponse.json({ error: 'Insert returned no data' }, { status: 500 });
+
+    // Create shadow client record so all tabs are immediately usable
+    const { data: shadowClient } = await supabase
+      .from('clients')
+      .insert({
+        prospect_id: prospect.id,
+        company_name: company_name.trim(),
+        contact_name: contact_name || null,
+        contact_email: contact_email || null,
+        contact_phone: contact_phone || null,
+        notes: notes || null,
+        program_type: 'captive_only',
+        is_prospect: true,
+        created_by: profile.id,
+      })
+      .select()
+      .single();
+
+    // Link prospect → shadow client
+    if (shadowClient) {
+      await supabase
+        .from('prospects')
+        .update({ linked_client_id: shadowClient.id })
+        .eq('id', prospect.id);
+      prospect.linked_client_id = shadowClient.id;
+    }
 
     await logActivity({
       userId: profile.id,

@@ -21,6 +21,7 @@ export interface Prospect {
   notes: string | null;
   status: ProspectStatus;
   converted_to_client_id: string | null;
+  linked_client_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -38,6 +39,7 @@ export type CarrierType = 'ottawa' | 'victoria' | 'none';
 export interface Client {
   id: string;
   prospect_id: string | null;
+  is_prospect: boolean;
   company_name: string;
   contact_name: string | null;
   contact_email: string | null;

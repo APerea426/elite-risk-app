@@ -17,6 +17,7 @@ export default async function ClientsPage() {
   const { data: clients } = await supabase
     .from('clients')
     .select('*')
+    .eq('is_prospect', false)
     .order('created_at', { ascending: false });
 
   return (
