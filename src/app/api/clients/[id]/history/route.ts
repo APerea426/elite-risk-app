@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .single();
     if (!profile) return NextResponse.json({ error: 'User not found' }, { status: 403 });
 
-    const { year, premium, losses } = await request.json();
+    const { year, line_of_coverage, premium, losses } = await request.json();
 
     if (!year || premium == null || losses == null) {
       return NextResponse.json({ error: 'Year, premium, and losses are required' }, { status: 400 });
@@ -30,7 +30,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: row, error } = await supabase
       .from('premium_loss_history')
-      .upsert({ client_id: id, year, premium, losses }, { onConflict: 'client_id,year' })
+      .upsert(
+        { client_id: id, year, line_of_coverage: line_of_coverage ?? null, premium, losses },
+        { onConflict: 'client_id,year,line_of_coverage' }
+      )
       .select()
       .single();
 

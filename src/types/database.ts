@@ -66,6 +66,7 @@ export interface PremiumLossHistory {
   id: string;
   client_id: string;
   year: number;
+  line_of_coverage: string | null;
   premium: number;
   losses: number;
   created_at: string;

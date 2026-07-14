@@ -435,7 +435,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   // History state
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editingHistory, setEditingHistory] = useState<PremiumLossHistory | null>(null);
-  const [historyForm, setHistoryForm] = useState({ year: '', premium: '', losses: '' });
+  const [historyForm, setHistoryForm] = useState({ year: '', line_of_coverage: '', premium: '', losses: '' });
   const [historySaving, setHistorySaving] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
@@ -605,14 +605,14 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
 
   function openAddHistory() {
     setEditingHistory(null);
-    setHistoryForm({ year: String(new Date().getFullYear()), premium: '', losses: '' });
+    setHistoryForm({ year: String(new Date().getFullYear()), line_of_coverage: '', premium: '', losses: '' });
     setHistoryError('');
     setHistoryOpen(true);
   }
 
   function openEditHistory(row: PremiumLossHistory) {
     setEditingHistory(row);
-    setHistoryForm({ year: String(row.year), premium: String(row.premium), losses: String(row.losses) });
+    setHistoryForm({ year: String(row.year), line_of_coverage: row.line_of_coverage ?? '', premium: String(row.premium), losses: String(row.losses) });
     setHistoryError('');
     setHistoryOpen(true);
   }
@@ -626,6 +626,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         year: Number(historyForm.year),
+        line_of_coverage: historyForm.line_of_coverage || null,
         premium: Number(historyForm.premium),
         losses: Number(historyForm.losses),
       }),
@@ -633,8 +634,11 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
     const data = await res.json();
     if (!res.ok) { setHistoryError(data.error); setHistorySaving(false); return; }
     setHistory(prev => {
-      const without = prev.filter(r => r.year !== data.year);
-      return [...without, data].sort((a, b) => b.year - a.year);
+      const without = prev.filter(r => !(r.year === data.year && r.line_of_coverage === data.line_of_coverage));
+      return [...without, data].sort((a, b) => {
+        if (b.year !== a.year) return b.year - a.year;
+        return (a.line_of_coverage ?? '').localeCompare(b.line_of_coverage ?? '');
+      });
     });
     setHistoryOpen(false);
     setHistorySaving(false);
@@ -906,205 +910,244 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       )}
 
       {/* Tab: History */}
-      {activeTab === 'history' && (
-        <div className="space-y-4">
-          {/* Premium & Loss Summary */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-700">Premium & Loss History</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Click a year row to view and manage individual losses by layer</p>
+      {activeTab === 'history' && (() => {
+        // Group rows by year; within each year sum premium/losses across lines
+        const byYear = history.reduce<Record<number, PremiumLossHistory[]>>((acc, r) => {
+          if (!acc[r.year]) acc[r.year] = [];
+          acc[r.year].push(r);
+          return acc;
+        }, {});
+        const sortedYears = Object.keys(byYear).map(Number).sort((a, b) => b - a);
+        const totalPremium = history.reduce((s, r) => s + r.premium, 0);
+        const totalLosses = history.reduce((s, r) => s + r.losses, 0);
+        const uniqueYears = sortedYears.length;
+
+        const lrColor = (losses: number, premium: number) =>
+          premium <= 0 ? '' : losses / premium > 1 ? 'text-red-600' : losses / premium > 0.7 ? 'text-amber-600' : 'text-green-700';
+
+        return (
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-700">Premium &amp; Loss History</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Grouped by policy year · expand a line to view individual claims</p>
+                </div>
+                <button
+                  onClick={openAddHistory}
+                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Add Line
+                </button>
               </div>
-              <button
-                onClick={openAddHistory}
-                className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
-              >
-                Add Year
-              </button>
-            </div>
-            {history.length === 0 ? (
-              <div className="p-10 text-center text-slate-400 text-sm">No history data yet. Add a year to get started.</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                  <tr>
-                    <th className="px-6 py-3 text-left w-8"></th>
-                    <th className="px-6 py-3 text-left">Year</th>
-                    <th className="px-6 py-3 text-right">Total Premium</th>
-                    <th className="px-6 py-3 text-right">Total Losses</th>
-                    <th className="px-6 py-3 text-right">Loss Ratio</th>
-                    <th className="px-6 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map(row => {
-                    const rowLosses = individualLosses.filter(l => l.history_id === row.id);
-                    const isExpanded = expandedYears.has(row.id);
-                    return (
-                      <>
-                        <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                          <td className="px-4 py-4 text-center">
-                            <button
-                              onClick={() => toggleYearExpand(row.id)}
-                              className="text-slate-400 hover:text-indigo-600 transition-colors"
-                              title={isExpanded ? 'Collapse losses' : 'View individual losses'}
-                            >
-                              {isExpanded ? '▼' : '▶'}
-                            </button>
-                          </td>
-                          <td className="px-6 py-4 font-medium text-slate-800">
-                            {row.year}
-                            {rowLosses.length > 0 && (
-                              <span className="ml-2 text-xs text-indigo-500 font-normal">{rowLosses.length} loss{rowLosses.length !== 1 ? 'es' : ''}</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 text-right text-slate-700">{fmt(row.premium)}</td>
-                          <td className="px-6 py-4 text-right text-slate-700">{fmt(row.losses)}</td>
-                          <td className="px-6 py-4 text-right">
-                            <span className={`font-medium ${(row.losses / row.premium) > 0.7 ? 'text-red-600' : 'text-green-700'}`}>
-                              {lossRatio(row.losses, row.premium)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center gap-3 justify-end">
-                              <button onClick={() => openEditHistory(row)} className="text-xs text-indigo-600 hover:underline">Edit</button>
-                              <button
-                                onClick={() => handleDeleteHistory(row.id)}
-                                disabled={deletingHistoryId === row.id}
-                                className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
-                              >
-                                {deletingHistoryId === row.id ? 'Deleting…' : 'Delete'}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {isExpanded && (
-                          <tr key={`${row.id}-losses`} className="bg-slate-50">
-                            <td colSpan={6} className="px-6 pb-4 pt-2">
-                              {/* Individual losses sub-table */}
-                              <div className="rounded-lg border border-slate-200 overflow-hidden">
-                                <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between">
-                                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                                    Individual Losses — {row.year}
-                                    {programStructure && (
-                                      <span className="ml-2 font-normal normal-case text-slate-400">
-                                        Captive layer: {fmt(programStructure.captive_retention)} · Excess layer: above retention
-                                      </span>
-                                    )}
-                                  </p>
-                                  <button
-                                    onClick={() => openAddLoss(row)}
-                                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                                  >
-                                    + Add Loss
-                                  </button>
-                                </div>
-                                {rowLosses.length === 0 ? (
-                                  <div className="px-4 py-6 text-center text-xs text-slate-400 bg-white">
-                                    No individual losses recorded.{' '}
-                                    <button onClick={() => openAddLoss(row)} className="text-indigo-500 hover:underline">Add the first one.</button>
-                                  </div>
-                                ) : (
-                                  <table className="w-full text-xs">
-                                    <thead className="bg-slate-50 text-slate-400 uppercase tracking-wide">
-                                      <tr>
-                                        <th className="px-4 py-2 text-left">Description</th>
-                                        <th className="px-4 py-2 text-right">Loss Amount</th>
-                                        <th className="px-4 py-2 text-right">Captive Layer</th>
-                                        <th className="px-4 py-2 text-right">Excess Layer</th>
-                                        <th className="px-4 py-2 text-left">Notes</th>
-                                        <th className="px-4 py-2"></th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 bg-white">
-                                      {rowLosses.map(loss => (
-                                        <tr key={loss.id}>
-                                          <td className="px-4 py-2.5 text-slate-700 font-medium">{loss.description}</td>
-                                          <td className="px-4 py-2.5 text-right text-slate-700">{fmt(loss.loss_amount)}</td>
-                                          <td className="px-4 py-2.5 text-right">
-                                            {loss.captive_portion != null
-                                              ? <span className="text-blue-700 font-medium">{fmt(loss.captive_portion)}</span>
-                                              : <span className="text-slate-400">—</span>}
-                                          </td>
-                                          <td className="px-4 py-2.5 text-right">
-                                            {loss.carrier_portion != null
-                                              ? <span className={loss.carrier_portion > 0 ? 'text-amber-700 font-medium' : 'text-slate-400'}>{fmt(loss.carrier_portion)}</span>
-                                              : <span className="text-slate-400">—</span>}
-                                          </td>
-                                          <td className="px-4 py-2.5 text-slate-400">{loss.notes ?? '—'}</td>
-                                          <td className="px-4 py-2.5 text-right">
-                                            <div className="flex items-center gap-2 justify-end">
-                                              <button onClick={() => openEditLoss(loss)} className="text-indigo-500 hover:text-indigo-700">Edit</button>
-                                              <button
-                                                onClick={() => handleDeleteLoss(loss)}
-                                                disabled={deletingLossId === loss.id}
-                                                className="text-red-400 hover:text-red-600 disabled:opacity-40"
-                                              >
-                                                {deletingLossId === loss.id ? '…' : 'Delete'}
-                                              </button>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                    <tfoot className="bg-slate-50 border-t border-slate-200">
-                                      <tr>
-                                        <td className="px-4 py-2 font-semibold text-slate-500">Total</td>
-                                        <td className="px-4 py-2 text-right font-semibold text-slate-700">{fmt(rowLosses.reduce((s, l) => s + l.loss_amount, 0))}</td>
-                                        <td className="px-4 py-2 text-right font-semibold text-blue-700">
-                                          {rowLosses.some(l => l.captive_portion != null)
-                                            ? fmt(rowLosses.reduce((s, l) => s + (l.captive_portion ?? 0), 0))
-                                            : '—'}
-                                        </td>
-                                        <td className="px-4 py-2 text-right font-semibold text-amber-700">
-                                          {rowLosses.some(l => l.carrier_portion != null)
-                                            ? fmt(rowLosses.reduce((s, l) => s + (l.carrier_portion ?? 0), 0))
-                                            : '—'}
-                                        </td>
-                                        <td colSpan={2}></td>
-                                      </tr>
-                                    </tfoot>
-                                  </table>
-                                )}
-                                {!programStructure && (
-                                  <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-700">
-                                    Set up a Program Structure to automatically split losses between captive and excess layers.
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </>
-                    );
-                  })}
-                </tbody>
-                {history.length > 1 && (
-                  <tfoot className="bg-slate-50 border-t border-slate-200">
+
+              {history.length === 0 ? (
+                <div className="p-10 text-center text-slate-400 text-sm">No history data yet. Add a line to get started.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                     <tr>
-                      <td></td>
-                      <td className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">5-Yr Avg</td>
-                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                        {fmt(history.reduce((s, r) => s + r.premium, 0) / history.length)}
-                      </td>
-                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                        {fmt(history.reduce((s, r) => s + r.losses, 0) / history.length)}
-                      </td>
-                      <td className="px-6 py-3 text-right text-xs font-medium text-slate-700">
-                        {lossRatio(
-                          history.reduce((s, r) => s + r.losses, 0),
-                          history.reduce((s, r) => s + r.premium, 0)
-                        )}
-                      </td>
-                      <td></td>
+                      <th className="px-4 py-3 w-8"></th>
+                      <th className="px-4 py-3 text-left">Year / Line</th>
+                      <th className="px-4 py-3 text-left">Coverage</th>
+                      <th className="px-4 py-3 text-right">Premium</th>
+                      <th className="px-4 py-3 text-right">Losses</th>
+                      <th className="px-4 py-3 text-right">Loss Ratio</th>
+                      <th className="px-4 py-3"></th>
                     </tr>
-                  </tfoot>
-                )}
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {sortedYears.map(yr => {
+                      const rows = byYear[yr];
+                      const yrPremium = rows.reduce((s, r) => s + r.premium, 0);
+                      const yrLosses = rows.reduce((s, r) => s + r.losses, 0);
+                      const multiLine = rows.length > 1;
+                      return (
+                        <>
+                          {/* Year header row */}
+                          <tr key={`yr-${yr}`} className="bg-slate-50 border-t-2 border-slate-200">
+                            <td className="px-4 py-3"></td>
+                            <td className="px-4 py-3 font-semibold text-slate-800" colSpan={2}>
+                              Policy Year {yr}
+                              {multiLine && <span className="ml-2 text-xs font-normal text-slate-400">{rows.length} lines</span>}
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-700">{yrPremium > 0 ? fmt(yrPremium) : <span className="text-slate-400 font-normal">—</span>}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-700">{fmt(yrLosses)}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`font-semibold ${lrColor(yrLosses, yrPremium)}`}>
+                                {lossRatio(yrLosses, yrPremium)}
+                              </span>
+                            </td>
+                            <td></td>
+                          </tr>
+
+                          {/* Line rows within the year */}
+                          {rows.map(row => {
+                            const rowLosses = individualLosses.filter(l => l.history_id === row.id);
+                            const isExpanded = expandedYears.has(row.id);
+                            return (
+                              <>
+                                <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                                  <td className="px-4 py-3 text-center">
+                                    <button
+                                      onClick={() => toggleYearExpand(row.id)}
+                                      className="text-slate-400 hover:text-indigo-600 transition-colors"
+                                      title={isExpanded ? 'Collapse claims' : 'View individual claims'}
+                                    >
+                                      {isExpanded ? '▼' : '▶'}
+                                    </button>
+                                  </td>
+                                  <td className="px-4 py-3 pl-8 text-slate-500 text-xs font-medium">
+                                    {row.line_of_coverage
+                                      ? <span className="inline-flex items-center px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold text-xs">{row.line_of_coverage}</span>
+                                      : <span className="text-slate-400 italic">Combined</span>
+                                    }
+                                    {rowLosses.length > 0 && (
+                                      <span className="ml-2 text-indigo-400">{rowLosses.length} claim{rowLosses.length !== 1 ? 's' : ''}</span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-slate-400">
+                                    {row.line_of_coverage === 'AL' && 'Auto Liability'}
+                                    {row.line_of_coverage === 'APD' && 'Auto Physical Damage'}
+                                    {row.line_of_coverage === 'GL' && 'General Liability'}
+                                    {row.line_of_coverage === 'MTC' && 'Motor Truck Cargo'}
+                                    {row.line_of_coverage === 'WC' && "Workers' Compensation"}
+                                    {!row.line_of_coverage && ''}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-slate-700 text-xs">{row.premium > 0 ? fmt(row.premium) : <span className="text-slate-400">—</span>}</td>
+                                  <td className="px-4 py-3 text-right text-slate-700 text-xs">{fmt(row.losses)}</td>
+                                  <td className="px-4 py-3 text-right text-xs">
+                                    <span className={`font-medium ${lrColor(row.losses, row.premium)}`}>
+                                      {lossRatio(row.losses, row.premium)}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <div className="flex items-center gap-3 justify-end">
+                                      <button onClick={() => openEditHistory(row)} className="text-xs text-indigo-600 hover:underline">Edit</button>
+                                      <button
+                                        onClick={() => handleDeleteHistory(row.id)}
+                                        disabled={deletingHistoryId === row.id}
+                                        className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+                                      >
+                                        {deletingHistoryId === row.id ? 'Deleting…' : 'Delete'}
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+
+                                {/* Expanded individual claims */}
+                                {isExpanded && (
+                                  <tr key={`${row.id}-claims`} className="bg-slate-50">
+                                    <td colSpan={7} className="px-6 pb-4 pt-1">
+                                      <div className="rounded-lg border border-slate-200 overflow-hidden ml-4">
+                                        <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between">
+                                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                            Individual Claims — {yr} {row.line_of_coverage ?? ''}
+                                            {programStructure && (
+                                              <span className="ml-2 font-normal normal-case text-slate-400">
+                                                Captive: {fmt(programStructure.captive_retention)} · Excess: above retention
+                                              </span>
+                                            )}
+                                          </p>
+                                          <button onClick={() => openAddLoss(row)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                                            + Add Claim
+                                          </button>
+                                        </div>
+                                        {rowLosses.length === 0 ? (
+                                          <div className="px-4 py-5 text-center text-xs text-slate-400 bg-white">
+                                            No claims recorded.{' '}
+                                            <button onClick={() => openAddLoss(row)} className="text-indigo-500 hover:underline">Add one.</button>
+                                          </div>
+                                        ) : (
+                                          <table className="w-full text-xs">
+                                            <thead className="bg-slate-50 text-slate-400 uppercase tracking-wide">
+                                              <tr>
+                                                <th className="px-4 py-2 text-left">Description</th>
+                                                <th className="px-4 py-2 text-right">Amount</th>
+                                                <th className="px-4 py-2 text-right">Captive</th>
+                                                <th className="px-4 py-2 text-right">Excess</th>
+                                                <th className="px-4 py-2 text-left">Notes</th>
+                                                <th className="px-4 py-2"></th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 bg-white">
+                                              {rowLosses.map(loss => (
+                                                <tr key={loss.id}>
+                                                  <td className="px-4 py-2.5 text-slate-700 font-medium">{loss.description}</td>
+                                                  <td className="px-4 py-2.5 text-right text-slate-700">{fmt(loss.loss_amount)}</td>
+                                                  <td className="px-4 py-2.5 text-right">
+                                                    {loss.captive_portion != null ? <span className="text-blue-700 font-medium">{fmt(loss.captive_portion)}</span> : <span className="text-slate-400">—</span>}
+                                                  </td>
+                                                  <td className="px-4 py-2.5 text-right">
+                                                    {loss.carrier_portion != null ? <span className={loss.carrier_portion > 0 ? 'text-amber-700 font-medium' : 'text-slate-400'}>{fmt(loss.carrier_portion)}</span> : <span className="text-slate-400">—</span>}
+                                                  </td>
+                                                  <td className="px-4 py-2.5 text-slate-400">{loss.notes ?? '—'}</td>
+                                                  <td className="px-4 py-2.5 text-right">
+                                                    <div className="flex items-center gap-2 justify-end">
+                                                      <button onClick={() => openEditLoss(loss)} className="text-indigo-500 hover:text-indigo-700">Edit</button>
+                                                      <button onClick={() => handleDeleteLoss(loss)} disabled={deletingLossId === loss.id} className="text-red-400 hover:text-red-600 disabled:opacity-40">
+                                                        {deletingLossId === loss.id ? '…' : 'Delete'}
+                                                      </button>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                            <tfoot className="bg-slate-50 border-t border-slate-200">
+                                              <tr>
+                                                <td className="px-4 py-2 font-semibold text-slate-500">Total</td>
+                                                <td className="px-4 py-2 text-right font-semibold text-slate-700">{fmt(rowLosses.reduce((s, l) => s + l.loss_amount, 0))}</td>
+                                                <td className="px-4 py-2 text-right font-semibold text-blue-700">
+                                                  {rowLosses.some(l => l.captive_portion != null) ? fmt(rowLosses.reduce((s, l) => s + (l.captive_portion ?? 0), 0)) : '—'}
+                                                </td>
+                                                <td className="px-4 py-2 text-right font-semibold text-amber-700">
+                                                  {rowLosses.some(l => l.carrier_portion != null) ? fmt(rowLosses.reduce((s, l) => s + (l.carrier_portion ?? 0), 0)) : '—'}
+                                                </td>
+                                                <td colSpan={2}></td>
+                                              </tr>
+                                            </tfoot>
+                                          </table>
+                                        )}
+                                        {!programStructure && (
+                                          <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-xs text-amber-700">
+                                            Set up a Program Structure to auto-split claims between captive and excess layers.
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            );
+                          })}
+                        </>
+                      );
+                    })}
+                  </tbody>
+                  {uniqueYears > 1 && (
+                    <tfoot className="bg-slate-100 border-t-2 border-slate-300">
+                      <tr>
+                        <td></td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase" colSpan={2}>
+                          {uniqueYears}-Year Total
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">
+                          {totalPremium > 0 ? fmt(totalPremium) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">{fmt(totalLosses)}</td>
+                        <td className="px-4 py-3 text-right text-xs font-semibold">
+                          <span className={lrColor(totalLosses, totalPremium)}>{lossRatio(totalLosses, totalPremium)}</span>
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tab: Commissions */}
       {activeTab === 'commissions' && (
@@ -2236,23 +2279,41 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">
-              {editingHistory ? `Edit ${editingHistory.year} Data` : 'Add Year'}
+              {editingHistory ? `Edit ${editingHistory.year}${editingHistory.line_of_coverage ? ` · ${editingHistory.line_of_coverage}` : ''}` : 'Add History Line'}
             </h2>
             <form onSubmit={handleSaveHistory} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Year <span className="text-red-500">*</span></label>
-                <input
-                  type="number"
-                  required
-                  min="2000"
-                  max="2099"
-                  value={historyForm.year}
-                  onChange={e => setHistoryForm(f => ({ ...f, year: e.target.value }))}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Policy Year <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    required
+                    min="2000"
+                    max="2099"
+                    value={historyForm.year}
+                    onChange={e => setHistoryForm(f => ({ ...f, year: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder={String(new Date().getFullYear())}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Line of Coverage</label>
+                  <select
+                    value={historyForm.line_of_coverage}
+                    onChange={e => setHistoryForm(f => ({ ...f, line_of_coverage: e.target.value }))}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="">Combined</option>
+                    <option value="AL">AL — Auto Liability</option>
+                    <option value="APD">APD — Auto Physical Damage</option>
+                    <option value="GL">GL — General Liability</option>
+                    <option value="MTC">MTC — Motor Truck Cargo</option>
+                    <option value="WC">WC — Workers&apos; Comp</option>
+                  </select>
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Total Premium ($) <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Written Premium ($) <span className="text-red-500">*</span></label>
                 <input
                   type="number"
                   required
@@ -2261,7 +2322,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   value={historyForm.premium}
                   onChange={e => setHistoryForm(f => ({ ...f, premium: e.target.value }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="500000"
+                  placeholder="0"
                 />
               </div>
               <div>
@@ -2274,7 +2335,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   value={historyForm.losses}
                   onChange={e => setHistoryForm(f => ({ ...f, losses: e.target.value }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="180000"
+                  placeholder="0"
                 />
               </div>
               {historyError && <p className="text-sm text-red-600">{historyError}</p>}
