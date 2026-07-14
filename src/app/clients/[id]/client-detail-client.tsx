@@ -440,6 +440,17 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [historyError, setHistoryError] = useState('');
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
 
+  // Loss run upload state
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadProcessing, setUploadProcessing] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [reviewRows, setReviewRows] = useState<{
+    year: number; line_of_coverage: string; losses: number; premium: number;
+    carrier: string; policy_number: string; selected: boolean;
+  }[]>([]);
+  const [reviewSaving, setReviewSaving] = useState(false);
+
   // Individual losses state
   const [individualLosses, setIndividualLosses] = useState<IndividualLoss[]>(initialIndividualLosses);
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
@@ -601,6 +612,55 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       setCoverages(prev => prev.filter(c => c.id !== coverageId));
     }
     setDeletingCoverageId(null);
+  }
+
+  async function handleUploadLossRun(e: React.FormEvent) {
+    e.preventDefault();
+    if (!uploadFile) return;
+    setUploadProcessing(true);
+    setUploadError('');
+    const body = new FormData();
+    body.append('file', uploadFile);
+    const res = await fetch(`/api/clients/${client.id}/loss-runs`, { method: 'POST', body });
+    const data = await res.json();
+    if (!res.ok) {
+      setUploadError(data.error ?? 'Extraction failed.');
+      setUploadProcessing(false);
+      return;
+    }
+    setReviewRows(data.rows.map((r: { year: number; line_of_coverage: string; losses: number; premium: number; carrier: string; policy_number: string }) => ({ ...r, selected: true })));
+    setUploadProcessing(false);
+  }
+
+  async function handleConfirmReview() {
+    setReviewSaving(true);
+    const toSave = reviewRows.filter(r => r.selected);
+    const saved: typeof history = [];
+    for (const row of toSave) {
+      const res = await fetch(`/api/clients/${client.id}/history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: row.year,
+          line_of_coverage: row.line_of_coverage || null,
+          premium: row.premium,
+          losses: row.losses,
+        }),
+      });
+      if (res.ok) { const d = await res.json(); saved.push(d); }
+    }
+    setHistory(prev => {
+      let next = [...prev];
+      for (const d of saved) {
+        next = next.filter(r => !(r.year === d.year && r.line_of_coverage === d.line_of_coverage));
+        next.push(d);
+      }
+      return next.sort((a, b) => b.year !== a.year ? b.year - a.year : (a.line_of_coverage ?? '').localeCompare(b.line_of_coverage ?? ''));
+    });
+    setReviewRows([]);
+    setUploadFile(null);
+    setUploadOpen(false);
+    setReviewSaving(false);
   }
 
   function openAddHistory() {
@@ -933,12 +993,23 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   <h2 className="text-sm font-semibold text-slate-700">Premium &amp; Loss History</h2>
                   <p className="text-xs text-slate-400 mt-0.5">Grouped by policy year · expand a line to view individual claims</p>
                 </div>
-                <button
-                  onClick={openAddHistory}
-                  className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  Add Line
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setUploadFile(null); setUploadError(''); setReviewRows([]); setUploadOpen(true); }}
+                    className="border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M12 12V4m0 0L8 8m4-4l4 4" />
+                    </svg>
+                    Upload Loss Run
+                  </button>
+                  <button
+                    onClick={openAddHistory}
+                    className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Add Line
+                  </button>
+                </div>
               </div>
 
               {history.length === 0 ? (
@@ -2275,6 +2346,170 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       })()}
 
       {/* Add/Edit History Modal */}
+      {/* Upload Loss Run modal */}
+      {uploadOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h2 className="text-base font-semibold text-slate-800">Upload Loss Run</h2>
+              <p className="text-xs text-slate-400 mt-0.5">PDF or image — Claude will extract policy years, lines, and loss totals for your review</p>
+            </div>
+
+            {reviewRows.length === 0 ? (
+              /* ── Step 1: file picker ── */
+              <form onSubmit={handleUploadLossRun} className="px-6 py-5 space-y-4">
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl p-8 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors">
+                  <svg className="w-10 h-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                  {uploadFile ? (
+                    <span className="text-sm font-medium text-indigo-700">{uploadFile.name}</span>
+                  ) : (
+                    <>
+                      <span className="text-sm font-medium text-slate-600">Click to select a loss run file</span>
+                      <span className="text-xs text-slate-400 mt-1">PDF, PNG, or JPEG · max 20 MB</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+                    className="hidden"
+                    onChange={e => { setUploadFile(e.target.files?.[0] ?? null); setUploadError(''); }}
+                  />
+                </label>
+                {uploadError && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{uploadError}</div>
+                )}
+                <div className="flex gap-3 justify-end pt-1">
+                  <button type="button" onClick={() => setUploadOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                  <button
+                    type="submit"
+                    disabled={!uploadFile || uploadProcessing}
+                    className="bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-sm px-5 py-2 rounded-lg flex items-center gap-2"
+                  >
+                    {uploadProcessing ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        Extracting…
+                      </>
+                    ) : 'Extract Data'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* ── Step 2: review extracted rows ── */
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-slate-600">
+                  Claude found <strong>{reviewRows.length}</strong> row{reviewRows.length !== 1 ? 's' : ''}. Check the boxes for rows to import, edit values if needed, then click Import.
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500 uppercase tracking-wide">
+                      <tr>
+                        <th className="px-3 py-2 w-8"></th>
+                        <th className="px-3 py-2 text-left">Year</th>
+                        <th className="px-3 py-2 text-left">Line</th>
+                        <th className="px-3 py-2 text-left">Carrier</th>
+                        <th className="px-3 py-2 text-right">Losses ($)</th>
+                        <th className="px-3 py-2 text-right">Premium ($)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {reviewRows.map((row, i) => (
+                        <tr key={i} className={row.selected ? '' : 'opacity-40'}>
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={row.selected}
+                              onChange={e => setReviewRows(prev => prev.map((r, j) => j === i ? { ...r, selected: e.target.checked } : r))}
+                              className="rounded border-slate-300 text-indigo-600"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              value={row.year}
+                              onChange={e => setReviewRows(prev => prev.map((r, j) => j === i ? { ...r, year: Number(e.target.value) } : r))}
+                              className="w-16 border border-slate-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <select
+                              value={row.line_of_coverage}
+                              onChange={e => setReviewRows(prev => prev.map((r, j) => j === i ? { ...r, line_of_coverage: e.target.value } : r))}
+                              className="border border-slate-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+                            >
+                              <option value="AL">AL</option>
+                              <option value="APD">APD</option>
+                              <option value="GL">GL</option>
+                              <option value="MTC">MTC</option>
+                              <option value="WC">WC</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </td>
+                          <td className="px-3 py-2 text-slate-500 max-w-[140px] truncate" title={row.carrier}>{row.carrier || '—'}</td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              value={row.losses}
+                              step="0.01"
+                              min="0"
+                              onChange={e => setReviewRows(prev => prev.map((r, j) => j === i ? { ...r, losses: Number(e.target.value) } : r))}
+                              className="w-24 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              value={row.premium}
+                              step="0.01"
+                              min="0"
+                              onChange={e => setReviewRows(prev => prev.map((r, j) => j === i ? { ...r, premium: Number(e.target.value) } : r))}
+                              className="w-24 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-slate-400">Losses and premium can be edited before importing. Existing rows for the same year + line will be overwritten.</p>
+                <div className="flex gap-3 justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setReviewRows([]); setUploadFile(null); }}
+                    className="text-sm text-slate-500 hover:text-slate-700"
+                  >
+                    ← Try another file
+                  </button>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setUploadOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+                    <button
+                      onClick={handleConfirmReview}
+                      disabled={reviewSaving || reviewRows.filter(r => r.selected).length === 0}
+                      className="bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white text-sm px-5 py-2 rounded-lg flex items-center gap-2"
+                    >
+                      {reviewSaving ? (
+                        <>
+                          <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                          </svg>
+                          Importing…
+                        </>
+                      ) : `Import ${reviewRows.filter(r => r.selected).length} row${reviewRows.filter(r => r.selected).length !== 1 ? 's' : ''}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {historyOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
