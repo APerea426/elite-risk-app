@@ -345,6 +345,8 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [pdfLoading, setPdfLoading] = useState(false);
   const [premiumTrend, setPremiumTrend] = useState('0');
   const [lossTrend, setLossTrend] = useState('0');
+  const [feasibilityLoading, setFeasibilityLoading] = useState(false);
+  const [feasibilityError, setFeasibilityError] = useState('');
 
   // Broker fees state
   const [brokerFees, setBrokerFees] = useState<BrokerFee[]>(initialBrokerFees);
@@ -885,6 +887,33 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
     a.click();
     URL.revokeObjectURL(url);
     setPdfLoading(false);
+  }
+
+  async function handleDownloadFeasibility() {
+    setFeasibilityLoading(true);
+    setFeasibilityError('');
+    const res = await fetch(`/api/clients/${client.id}/feasibility-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        premium_trend: parseFloat(premiumTrend) || 0,
+        loss_trend: parseFloat(lossTrend) || 0,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Unknown error' }));
+      setFeasibilityError(data.error ?? 'Failed to generate report');
+      setFeasibilityLoading(false);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `captive-feasibility-${client.company_name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setFeasibilityLoading(false);
   }
 
   const tabClass = (id: TabId) =>
@@ -1884,6 +1913,13 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   </button>
                 )}
                 <button
+                  onClick={handleDownloadFeasibility}
+                  disabled={feasibilityLoading}
+                  className="border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {feasibilityLoading ? 'Building Report…' : 'Feasibility Report'}
+                </button>
+                <button
                   onClick={handleGenerateProjection}
                   disabled={projecting}
                   className="bg-indigo-700 hover:bg-indigo-800 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50"
@@ -1894,6 +1930,9 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
             </div>
           )}
 
+          {feasibilityError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{feasibilityError}</div>
+          )}
           {projectionError && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{projectionError}</div>
           )}
