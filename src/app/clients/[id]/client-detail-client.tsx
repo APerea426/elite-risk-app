@@ -1892,33 +1892,33 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
             </div>
           )}
 
-          {history.length > 0 && programStructure && (
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-700">Profitability Analysis</h2>
-                {latestProjection && (
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Last generated {new Date(latestProjection.created_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                {latestProjection && (
-                  <button
-                    onClick={handleDownloadPdf}
-                    disabled={pdfLoading}
-                    className="text-sm text-indigo-600 hover:underline disabled:opacity-50"
-                  >
-                    {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
-                  </button>
-                )}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">Profitability Analysis</h2>
+              {latestProjection && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Last generated {new Date(latestProjection.created_at).toLocaleString()}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {latestProjection && (
                 <button
-                  onClick={handleDownloadFeasibility}
-                  disabled={feasibilityLoading}
-                  className="border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                  onClick={handleDownloadPdf}
+                  disabled={pdfLoading}
+                  className="text-sm text-indigo-600 hover:underline disabled:opacity-50"
                 >
-                  {feasibilityLoading ? 'Building Report…' : 'Feasibility Report'}
+                  {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
                 </button>
+              )}
+              <button
+                onClick={handleDownloadFeasibility}
+                disabled={feasibilityLoading}
+                className="border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {feasibilityLoading ? 'Building Report…' : 'Feasibility Report'}
+              </button>
+              {history.length > 0 && programStructure && (
                 <button
                   onClick={handleGenerateProjection}
                   disabled={projecting}
@@ -1926,9 +1926,9 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 >
                   {projecting ? 'Generating…' : latestProjection ? 'Regenerate Report' : 'Generate Report'}
                 </button>
-              </div>
+              )}
             </div>
-          )}
+          </div>
 
           {feasibilityError && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{feasibilityError}</div>
