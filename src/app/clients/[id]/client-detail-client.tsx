@@ -343,6 +343,8 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [projecting, setProjecting] = useState(false);
   const [projectionError, setProjectionError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [premiumTrend, setPremiumTrend] = useState('0');
+  const [lossTrend, setLossTrend] = useState('0');
 
   // Broker fees state
   const [brokerFees, setBrokerFees] = useState<BrokerFee[]>(initialBrokerFees);
@@ -1987,48 +1989,108 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                   </table>
                 </div>
 
-                {/* Forward projection — stored snapshot */}
-                {storedProjection ? (
-                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100">
-                      <h3 className="text-sm font-semibold text-slate-700">5-Year Forward Projection</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Based on {storedProjection.summary.years_of_history} {storedProjection.summary.years_of_history === 1 ? 'year' : 'years'} of history · avg loss rate {(storedProjection.summary.avg_historical_loss_rate * 100).toFixed(1)}%
-                        {isStale && <span className="text-amber-500 ml-2">· stale — regenerate to update</span>}
-                      </p>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                        <tr>
-                          <th className="px-4 py-3 text-left">Year</th>
-                          <th className="px-4 py-3 text-right">Captive Premium</th>
-                          <th className="px-4 py-3 text-right">Projected Losses</th>
-                          <th className="px-4 py-3 text-right">Captive Losses</th>
-                          <th className="px-4 py-3 text-right">Expenses</th>
-                          <th className="px-4 py-3 text-right">Net Profit</th>
-                          <th className="px-4 py-3 text-right">Cumulative Profit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {storedProjection.projection.map((row, idx) => (
-                          <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
-                            <td className="px-4 py-3 font-medium text-slate-800">Year {row.year}</td>
-                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
-                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_total_losses)}</td>
-                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_captive_losses)}</td>
-                            <td className="px-4 py-3 text-right text-slate-700">{fmt(row.expenses)}</td>
-                            <td className={`px-4 py-3 text-right font-medium ${row.net_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                              {fmt2(row.net_profit)}
-                            </td>
-                            <td className={`px-4 py-3 text-right font-medium ${row.cumulative_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                              {fmt2(row.cumulative_profit)}
-                            </td>
+                {/* Forward projection — stored snapshot with live trend overlay */}
+                {storedProjection ? (() => {
+                  const pTrend = (parseFloat(premiumTrend) || 0) / 100;
+                  const lTrend = (parseFloat(lossTrend) || 0) / 100;
+                  const hasTrend = pTrend !== 0 || lTrend !== 0;
+                  let cumulative = 0;
+                  const trendedRows = storedProjection.projection.map((row, i) => {
+                    const yr = i + 1;
+                    const captive_premium = row.captive_premium * Math.pow(1 + pTrend, yr);
+                    const projected_total_losses = row.projected_total_losses * Math.pow(1 + lTrend, yr);
+                    const projected_captive_losses = projected_total_losses;
+                    const net_profit = captive_premium - projected_captive_losses - row.expenses;
+                    cumulative += net_profit;
+                    return { year: row.year, captive_premium, projected_total_losses, projected_captive_losses, expenses: row.expenses, net_profit, cumulative_profit: cumulative };
+                  });
+                  const trendedAvgProfit = cumulative / 5;
+
+                  return (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-700">5-Year Forward Projection</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Based on {storedProjection.summary.years_of_history} {storedProjection.summary.years_of_history === 1 ? 'year' : 'years'} of history · avg loss rate {(storedProjection.summary.avg_historical_loss_rate * 100).toFixed(1)}%
+                            {isStale && <span className="text-amber-500 ml-2">· stale — regenerate to update</span>}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-slate-500 whitespace-nowrap">Premium Trend</label>
+                            <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={premiumTrend}
+                                onChange={e => setPremiumTrend(e.target.value)}
+                                className="w-16 px-2 py-1 text-xs text-right focus:outline-none"
+                                placeholder="0"
+                              />
+                              <span className="px-2 text-xs text-slate-400 bg-slate-50 border-l border-slate-300">%</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <label className="text-xs text-slate-500 whitespace-nowrap">Loss Trend</label>
+                            <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500">
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={lossTrend}
+                                onChange={e => setLossTrend(e.target.value)}
+                                className="w-16 px-2 py-1 text-xs text-right focus:outline-none"
+                                placeholder="0"
+                              />
+                              <span className="px-2 text-xs text-slate-400 bg-slate-50 border-l border-slate-300">%</span>
+                            </div>
+                          </div>
+                          {hasTrend && (
+                            <button onClick={() => { setPremiumTrend('0'); setLossTrend('0'); }} className="text-xs text-slate-400 hover:text-slate-600">
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {hasTrend && (
+                        <div className="px-6 py-2 bg-indigo-50 border-b border-indigo-100 text-xs text-indigo-700 flex gap-4">
+                          <span>Avg Annual Profit: <strong>{fmt2(trendedAvgProfit)}</strong></span>
+                          <span>5-Year Total: <strong>{fmt2(cumulative)}</strong></span>
+                        </div>
+                      )}
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                          <tr>
+                            <th className="px-4 py-3 text-left">Year</th>
+                            <th className="px-4 py-3 text-right">Captive Premium</th>
+                            <th className="px-4 py-3 text-right">Projected Losses</th>
+                            <th className="px-4 py-3 text-right">Captive Losses</th>
+                            <th className="px-4 py-3 text-right">Expenses</th>
+                            <th className="px-4 py-3 text-right">Net Profit</th>
+                            <th className="px-4 py-3 text-right">Cumulative Profit</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {trendedRows.map((row, idx) => (
+                            <tr key={row.year} className={idx % 2 === 1 ? 'bg-slate-50' : ''}>
+                              <td className="px-4 py-3 font-medium text-slate-800">Year {row.year}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{fmt(row.captive_premium)}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_total_losses)}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{fmt(row.projected_captive_losses)}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{fmt(row.expenses)}</td>
+                              <td className={`px-4 py-3 text-right font-medium ${row.net_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                {fmt2(row.net_profit)}
+                              </td>
+                              <td className={`px-4 py-3 text-right font-medium ${row.cumulative_profit >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                {fmt2(row.cumulative_profit)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })() : (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-6 text-center text-sm text-slate-500">
                     Click <strong>Generate Report</strong> above to calculate the 5-year forward projection.
                   </div>
