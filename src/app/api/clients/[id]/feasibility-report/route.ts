@@ -86,8 +86,9 @@ export async function POST(
     let proj5yr = 0;
 
     const storedProj = projectionResult.data?.projection_data;
-    const baseProjRows = storedProj?.projection ?? (() => {
-      // Inline computation matching projection-calc.ts
+
+    type ProjRow = { year: number; captive_premium: number; projected_total_losses: number; projected_captive_losses: number; expenses: number; net_profit: number; cumulative_profit: number };
+    const baseProjRows: ProjRow[] = storedProj?.projection ?? (() => {
       const projCaptivePremium = structure.new_annual_premium * structure.captive_premium_pct;
       const projected_total_losses = structure.new_annual_premium * avgLossRate;
       let cum = 0;
