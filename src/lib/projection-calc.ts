@@ -25,7 +25,9 @@ export function calculateProjection(
   let cumulative = 0;
   const projection = Array.from({ length: 5 }, (_, i) => {
     const projected_total_losses = structure.new_annual_premium * avg_historical_loss_rate;
-    const projected_captive_losses = Math.min(projected_total_losses, structure.captive_retention);
+    // Per-occurrence (each & every): captive absorbs each claim up to retention individually,
+    // so total captive losses are not capped at the retention — use full projected losses.
+    const projected_captive_losses = projected_total_losses;
     const net_profit = projCaptivePremium - projected_captive_losses - structure.annual_expenses;
     cumulative += net_profit;
     return { year: i + 1, captive_premium: projCaptivePremium, projected_total_losses, projected_captive_losses, expenses: structure.annual_expenses, net_profit, cumulative_profit: cumulative };
