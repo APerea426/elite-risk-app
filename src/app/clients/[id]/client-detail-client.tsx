@@ -442,6 +442,8 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
 
   // Inline premium / losses editing — click a cell to edit in place
   const [inlineEdit, setInlineEdit] = useState<{ id: string; field: 'premium' | 'losses'; value: string } | null>(null);
+  // Year-level total premium edit for multi-line years (distributes evenly across all lines)
+  const [yearPremiumEdit, setYearPremiumEdit] = useState<{ year: number; value: string } | null>(null);
 
   function startInlineEdit(row: PremiumLossHistory, field: 'premium' | 'losses') {
     setInlineEdit({ id: row.id, field, value: field === 'premium' ? String(row.premium || '') : String(row.losses || '') });
@@ -462,6 +464,31 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
       const data = await res.json();
       setHistory(prev => prev.map(r => r.id === histId ? data : r));
     }
+  }
+
+  async function commitYearPremiumEdit(rows: PremiumLossHistory[]) {
+    if (!yearPremiumEdit) return;
+    const { value } = yearPremiumEdit;
+    const total = parseFloat(value);
+    setYearPremiumEdit(null);
+    if (isNaN(total) || total < 0) return;
+    const perLine = Math.round((total / rows.length) * 100) / 100;
+    const results = await Promise.all(
+      rows.map(row =>
+        fetch(`/api/clients/${client.id}/history/${row.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ premium: perLine }),
+        }).then(r => r.ok ? r.json() : null)
+      )
+    );
+    setHistory(prev => {
+      let next = [...prev];
+      for (const data of results) {
+        if (data) next = next.map(r => r.id === data.id ? data : r);
+      }
+      return next;
+    });
   }
 
   // Loss run upload state
@@ -1066,7 +1093,45 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                               Policy Year {yr}
                               {multiLine && <span className="ml-2 text-xs font-normal text-slate-400">{rows.length} lines</span>}
                             </td>
-                            <td className="px-4 py-3 text-right font-semibold text-slate-700">{yrPremium > 0 ? fmt(yrPremium) : <span className="text-slate-400 font-normal">—</span>}</td>
+                            <td
+                              className="px-4 py-3 text-right font-semibold text-slate-700 cursor-pointer group"
+                              onClick={() => {
+                                if (inlineEdit || yearPremiumEdit) return;
+                                if (multiLine) setYearPremiumEdit({ year: yr, value: String(yrPremium || '') });
+                                else startInlineEdit(rows[0], 'premium');
+                              }}
+                              title={multiLine ? `Click to set total premium (split evenly across ${rows.length} lines)` : 'Click to edit premium'}
+                            >
+                              {multiLine && yearPremiumEdit?.year === yr ? (
+                                <input
+                                  autoFocus
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={yearPremiumEdit.value}
+                                  onChange={e => setYearPremiumEdit(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                  onBlur={() => commitYearPremiumEdit(rows)}
+                                  onKeyDown={e => { if (e.key === 'Enter') commitYearPremiumEdit(rows); if (e.key === 'Escape') setYearPremiumEdit(null); }}
+                                  className="w-32 border border-indigo-400 rounded px-2 py-0.5 text-right text-xs font-normal focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                />
+                              ) : !multiLine && inlineEdit?.id === rows[0].id && inlineEdit.field === 'premium' ? (
+                                <input
+                                  autoFocus
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={inlineEdit.value}
+                                  onChange={e => setInlineEdit(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                  onBlur={commitInlineEdit}
+                                  onKeyDown={e => { if (e.key === 'Enter') commitInlineEdit(); if (e.key === 'Escape') setInlineEdit(null); }}
+                                  className="w-28 border border-indigo-400 rounded px-2 py-0.5 text-right text-xs font-normal focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                />
+                              ) : (
+                                <span className={`font-semibold group-hover:text-indigo-600 transition-colors ${yrPremium > 0 ? 'text-slate-700' : 'text-slate-400 font-normal'}`}>
+                                  {yrPremium > 0 ? fmt(yrPremium) : '— click to add'}
+                                </span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-right font-semibold text-slate-700">{fmt(yrLosses)}</td>
                             <td className="px-4 py-3 text-right">
                               <span className={`font-semibold ${lrColor(yrLosses, yrPremium)}`}>
