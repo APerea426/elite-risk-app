@@ -298,22 +298,32 @@ export default function FeasibilityReportPDF({ data }: { data: FeasibilityReport
         </View>
       </Page>
 
-      {/* ── PAGE 3 (conditional): Individual Claims ── */}
-      {individual_claims.length > 0 && (
+      {/* ── PAGE 3 (conditional): Significant Individual Claims > $100k ── */}
+      {individual_claims.length > 0 && (() => {
+        const THRESHOLD = 100000;
+        const significant = [...individual_claims]
+          .filter(c => c.loss_amount > THRESHOLD)
+          .sort((a, b) => b.loss_amount - a.loss_amount);
+        const excluded = individual_claims.length - significant.length;
+        const sigTotal    = significant.reduce((s, c) => s + c.loss_amount, 0);
+        const sigCaptive  = significant.reduce((s, c) => s + c.captive_portion, 0);
+        const sigExcess   = significant.reduce((s, c) => s + c.excess_portion, 0);
+
+        return (
         <Page size="LETTER" orientation="landscape" style={styles.page}>
           <View style={styles.pageHeader}>
             <Text style={styles.companyName}>{client_name}</Text>
-            <Text style={styles.reportTitle}>Captive Insurance Feasibility Report · Individual Loss Detail</Text>
+            <Text style={styles.reportTitle}>Captive Insurance Feasibility Report · Significant Loss Detail (Claims &gt; $100,000)</Text>
           </View>
 
           <View style={styles.metaBar}>
             {[
-              ['Total Claims', String(summary.total_claims)],
+              ['Total Claims on File', String(summary.total_claims)],
+              ['Claims > $100,000', String(significant.length)],
               ['Largest Claim', $f(summary.largest_claim)],
-              ['Claims ≤ Retention', `${summary.total_claims - summary.claims_above_retention} (${pct((summary.total_claims - summary.claims_above_retention) / summary.total_claims)})`],
-              ['Claims > Retention', `${summary.claims_above_retention} (${pct(summary.claims_above_retention / summary.total_claims)})`],
-              ['Total Captive Exposure', $f(individual_claims.reduce((s, c) => s + c.captive_portion, 0))],
-              ['Total Excess Transfer', $f(individual_claims.reduce((s, c) => s + c.excess_portion, 0))],
+              ['Claims > Retention', `${summary.claims_above_retention} of ${summary.total_claims}`],
+              ['Significant Captive Exposure', $f(sigCaptive)],
+              ['Significant Excess Transfer', $f(sigExcess)],
             ].map(([label, value]) => (
               <View key={label} style={styles.metaItem}>
                 <Text style={styles.metaLabel}>{label}</Text>
@@ -322,37 +332,47 @@ export default function FeasibilityReportPDF({ data }: { data: FeasibilityReport
             ))}
           </View>
 
-          <Text style={styles.sectionTitle}>Claims by Size (Largest First)</Text>
-          <View>
-            <View style={styles.tableHeaderRow}>
-              {['Year', 'Description', 'Line', 'Total Loss', 'Captive Portion', 'Excess Portion'].map((h, i) => (
-                <Text key={h} style={[styles.cellHeader, { flex: claimCols[i] }]}>{h}</Text>
-              ))}
+          {significant.length === 0 ? (
+            <View style={[styles.narrativeBox, { marginTop: 10 }]}>
+              <Text style={styles.narrativeText}>
+                No individual claims exceeded $100,000. All {summary.total_claims} documented claims were below this threshold, indicating a low-severity loss profile well-suited to the captive structure.
+              </Text>
             </View>
-            {[...individual_claims].sort((a, b) => b.loss_amount - a.loss_amount).slice(0, 30).map((c, idx) => (
-              <View key={idx} style={idx % 2 === 0 ? styles.tableRow : styles.tableRowAlt}>
-                <Text style={[styles.cellBold, { flex: claimCols[0] }]}>{c.year}</Text>
-                <Text style={[styles.cell, { flex: claimCols[1] }]}>{c.description}</Text>
-                <Text style={[styles.cell, { flex: claimCols[2] }]}>{c.line_of_coverage ?? '—'}</Text>
-                <Text style={[styles.cellBold, { flex: claimCols[3] }]}>{$f(c.loss_amount)}</Text>
-                <Text style={[styles.cell, { color: '#1d4ed8', flex: claimCols[4] }]}>{$f(c.captive_portion)}</Text>
-                <Text style={[styles.cell, { color: c.excess_portion > 0 ? AMBER : SLATE_500, flex: claimCols[5] }]}>{$f(c.excess_portion)}</Text>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>Claims Over $100,000 — Largest First</Text>
+              <View>
+                <View style={styles.tableHeaderRow}>
+                  {['Year', 'Description', 'Line', 'Total Loss', 'Captive Portion', 'Excess Portion'].map((h, i) => (
+                    <Text key={h} style={[styles.cellHeader, { flex: claimCols[i] }]}>{h}</Text>
+                  ))}
+                </View>
+                {significant.map((c, idx) => (
+                  <View key={idx} style={idx % 2 === 0 ? styles.tableRow : styles.tableRowAlt}>
+                    <Text style={[styles.cellBold, { flex: claimCols[0] }]}>{c.year}</Text>
+                    <Text style={[styles.cell, { flex: claimCols[1] }]}>{c.description}</Text>
+                    <Text style={[styles.cell, { flex: claimCols[2] }]}>{c.line_of_coverage ?? '—'}</Text>
+                    <Text style={[styles.cellBold, { flex: claimCols[3] }]}>{$f(c.loss_amount)}</Text>
+                    <Text style={[styles.cell, { color: '#1d4ed8', flex: claimCols[4] }]}>{$f(c.captive_portion)}</Text>
+                    <Text style={[styles.cell, { color: c.excess_portion > 0 ? AMBER : SLATE_500, flex: claimCols[5] }]}>{$f(c.excess_portion)}</Text>
+                  </View>
+                ))}
+                <View style={styles.tableSummaryRow}>
+                  <Text style={[styles.cellBold, { flex: claimCols[0] }]}></Text>
+                  <Text style={[styles.cellBold, { flex: claimCols[1] }]}>Subtotal ({significant.length} claim{significant.length !== 1 ? 's' : ''})</Text>
+                  <Text style={[styles.cell, { flex: claimCols[2] }]}></Text>
+                  <Text style={[styles.cellBold, { flex: claimCols[3] }]}>{$f(sigTotal)}</Text>
+                  <Text style={[styles.cellBold, { color: '#1d4ed8', flex: claimCols[4] }]}>{$f(sigCaptive)}</Text>
+                  <Text style={[styles.cellBold, { color: sigExcess > 0 ? AMBER : SLATE_500, flex: claimCols[5] }]}>{$f(sigExcess)}</Text>
+                </View>
               </View>
-            ))}
-            {individual_claims.length > 30 && (
-              <View style={[styles.tableRow, { padding: 5 }]}>
-                <Text style={{ fontSize: 8, color: SLATE_500 }}>… and {individual_claims.length - 30} additional claims not shown</Text>
-              </View>
-            )}
-            <View style={styles.tableSummaryRow}>
-              <Text style={[styles.cellBold, { flex: claimCols[0] }]}></Text>
-              <Text style={[styles.cellBold, { flex: claimCols[1] }]}>Total ({individual_claims.length} claims)</Text>
-              <Text style={[styles.cell, { flex: claimCols[2] }]}></Text>
-              <Text style={[styles.cellBold, { flex: claimCols[3] }]}>{$f(individual_claims.reduce((s, c) => s + c.loss_amount, 0))}</Text>
-              <Text style={[styles.cellBold, { color: '#1d4ed8', flex: claimCols[4] }]}>{$f(individual_claims.reduce((s, c) => s + c.captive_portion, 0))}</Text>
-              <Text style={[styles.cellBold, { color: AMBER, flex: claimCols[5] }]}>{$f(individual_claims.reduce((s, c) => s + c.excess_portion, 0))}</Text>
-            </View>
-          </View>
+              {excluded > 0 && (
+                <Text style={{ fontSize: 7, color: SLATE_500, marginTop: 4 }}>
+                  * {excluded} claim{excluded !== 1 ? 's' : ''} under $100,000 not shown. Total all-claims captive exposure: {$f(individual_claims.reduce((s, c) => s + c.captive_portion, 0))}.
+                </Text>
+              )}
+            </>
+          )}
 
           <View style={[styles.narrativeBox, { marginTop: 12 }]}>
             <Text style={styles.narrativeText}>
@@ -368,7 +388,8 @@ export default function FeasibilityReportPDF({ data }: { data: FeasibilityReport
             <Text style={styles.footerText}>{genDate} · Page 3 of 4</Text>
           </View>
         </Page>
-      )}
+        );
+      })()}
 
       {/* ── PAGE 4 (or 3): 5-Year Projection & Recommendation ── */}
       <Page size="LETTER" orientation="landscape" style={styles.page}>
