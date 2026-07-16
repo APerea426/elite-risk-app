@@ -204,7 +204,7 @@ function EngagementTab({ clientId, client }: { clientId: string; client: Client 
             <input
               type="number"
               min="0"
-              step="1000"
+              step="any"
               value={form.management_fee}
               onChange={e => setForm(f => ({ ...f, management_fee: e.target.value }))}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1768,7 +1768,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Captive Retention / Deductible ($) <span className="text-red-500">*</span></label>
                   <input
-                    type="number" required min="0" step="1000"
+                    type="number" required min="0" step="any"
                     placeholder="500000"
                     value={structureForm.captive_retention}
                     onChange={e => setStructureForm(f => ({ ...f, captive_retention: e.target.value }))}
@@ -1778,7 +1778,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Excess Layer ($) <span className="text-red-500">*</span></label>
                   <input
-                    type="number" required min="0" step="1000"
+                    type="number" required min="0" step="any"
                     placeholder="1000000"
                     value={structureForm.excess_layer}
                     onChange={e => setStructureForm(f => ({ ...f, excess_layer: e.target.value }))}
@@ -1800,7 +1800,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">New Annual Premium ($) <span className="text-red-500">*</span></label>
                   <input
-                    type="number" required min="0" step="1000"
+                    type="number" required min="0" step="any"
                     placeholder="600000"
                     value={structureForm.new_annual_premium}
                     onChange={e => setStructureForm(f => ({ ...f, new_annual_premium: e.target.value }))}
@@ -1810,7 +1810,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Annual Expenses ($) <span className="text-red-500">*</span></label>
                   <input
-                    type="number" required min="0" step="100"
+                    type="number" required min="0" step="any"
                     placeholder="25000"
                     value={structureForm.annual_expenses}
                     onChange={e => setStructureForm(f => ({ ...f, annual_expenses: e.target.value }))}
@@ -2323,7 +2323,7 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                 <input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="any"
                   value={coverageForm.policy_limit}
                   onChange={e => setCoverageForm(f => ({ ...f, policy_limit: e.target.value }))}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
