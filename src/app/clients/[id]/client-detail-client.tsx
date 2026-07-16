@@ -440,6 +440,30 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
   const [historyError, setHistoryError] = useState('');
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
 
+  // Inline premium / losses editing — click a cell to edit in place
+  const [inlineEdit, setInlineEdit] = useState<{ id: string; field: 'premium' | 'losses'; value: string } | null>(null);
+
+  function startInlineEdit(row: PremiumLossHistory, field: 'premium' | 'losses') {
+    setInlineEdit({ id: row.id, field, value: field === 'premium' ? String(row.premium || '') : String(row.losses || '') });
+  }
+
+  async function commitInlineEdit() {
+    if (!inlineEdit) return;
+    const { id: histId, field, value } = inlineEdit;
+    const num = parseFloat(value);
+    setInlineEdit(null);
+    if (isNaN(num) || num < 0) return;
+    const res = await fetch(`/api/clients/${client.id}/history/${histId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: num }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setHistory(prev => prev.map(r => r.id === histId ? data : r));
+    }
+  }
+
   // Loss run upload state
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -1085,8 +1109,52 @@ export default function ClientDetailClient({ client: initialClient, coverages: i
                                     {row.line_of_coverage === 'WC' && "Workers' Compensation"}
                                     {!row.line_of_coverage && ''}
                                   </td>
-                                  <td className="px-4 py-3 text-right text-slate-700 text-xs">{row.premium > 0 ? fmt(row.premium) : <span className="text-slate-400">—</span>}</td>
-                                  <td className="px-4 py-3 text-right text-slate-700 text-xs">{fmt(row.losses)}</td>
+                                  <td
+                                    className="px-4 py-3 text-right text-xs cursor-pointer group"
+                                    onClick={() => !inlineEdit && startInlineEdit(row, 'premium')}
+                                    title="Click to edit premium"
+                                  >
+                                    {inlineEdit?.id === row.id && inlineEdit.field === 'premium' ? (
+                                      <input
+                                        autoFocus
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={inlineEdit.value}
+                                        onChange={e => setInlineEdit(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                        onBlur={commitInlineEdit}
+                                        onKeyDown={e => { if (e.key === 'Enter') commitInlineEdit(); if (e.key === 'Escape') setInlineEdit(null); }}
+                                        className="w-28 border border-indigo-400 rounded px-2 py-0.5 text-right text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                      />
+                                    ) : (
+                                      <span className={`${row.premium > 0 ? 'text-slate-700' : 'text-slate-400'} group-hover:text-indigo-600 transition-colors`}>
+                                        {row.premium > 0 ? fmt(row.premium) : '— click to add'}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td
+                                    className="px-4 py-3 text-right text-xs cursor-pointer group"
+                                    onClick={() => !inlineEdit && startInlineEdit(row, 'losses')}
+                                    title="Click to edit losses"
+                                  >
+                                    {inlineEdit?.id === row.id && inlineEdit.field === 'losses' ? (
+                                      <input
+                                        autoFocus
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={inlineEdit.value}
+                                        onChange={e => setInlineEdit(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                        onBlur={commitInlineEdit}
+                                        onKeyDown={e => { if (e.key === 'Enter') commitInlineEdit(); if (e.key === 'Escape') setInlineEdit(null); }}
+                                        className="w-28 border border-indigo-400 rounded px-2 py-0.5 text-right text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                      />
+                                    ) : (
+                                      <span className={`${row.losses > 0 ? 'text-slate-700' : 'text-slate-400'} group-hover:text-indigo-600 transition-colors`}>
+                                        {row.losses > 0 ? fmt(row.losses) : '— click to add'}
+                                      </span>
+                                    )}
+                                  </td>
                                   <td className="px-4 py-3 text-right text-xs">
                                     <span className={`font-medium ${lrColor(row.losses, row.premium)}`}>
                                       {lossRatio(row.losses, row.premium)}
